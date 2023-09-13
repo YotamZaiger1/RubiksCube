@@ -52,7 +52,7 @@ class Face:
 
         elif orientation is Orientation.Y:
             if self.face_id is FaceID.F or self.face_id is FaceID.U or self.face_id is FaceID.B:
-                index_generator = self._top_down_strip_indices_generator(index)
+                index_generator = self._bottom_up_strip_indices_generator(index)
             elif self.face_id is FaceID.D:
                 index_generator = self._top_down_strip_indices_generator(-index - 1)
             else:
