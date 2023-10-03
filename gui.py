@@ -2,7 +2,7 @@ import pygame as pg
 
 from color import Color
 from cube import Cube
-from face import FaceID
+from face_id import FaceID
 from move import Move
 from orientation import Orientation
 
@@ -12,7 +12,7 @@ NO_COLOR = (0, 0, 0, 0)
 
 class GUI:
     def __init__(self, cube: Cube, sticker_size: int = 30, sticker_extra_size: int = 3, face_extra_size: int = 7,
-                 screen_extra_size: int = 100):
+                 screen_extra_size: int = 50):
         self.cube: Cube = cube
 
         self.sticker_size: int = sticker_size
@@ -62,6 +62,10 @@ class GUI:
                 if event.type == pg.MOUSEBUTTONDOWN:
                     if selected_move is not None:
                         self.cube.move(selected_move)
+
+                if event.type == pg.KEYDOWN:
+                    if event.key == pg.K_ESCAPE:
+                        done = True
 
             GUI._update_screen(screen, background, foreground, overlay)
 
@@ -179,30 +183,8 @@ class GUI:
         elif face_id is FaceID.U or face_id is FaceID.D:
             orientation = Orientation.Y if is_shift_down else Orientation.Z
         else:
-            raise
+            raise ValueError(f"Unknown FaceID {face_id!r}.")
 
-        if orientation is Orientation.X:
-            if face_id is FaceID.F:
-                index = row
-            elif face_id is FaceID.R:
-                index = col
-            elif face_id is FaceID.B:
-                index = self.cube.size - 1 - row
-            else:  # must be FaceID.L
-                index = self.cube.size - 1 - col
-
-        elif orientation is Orientation.Y:
-            if face_id is FaceID.F or face_id is FaceID.U or face_id is FaceID.B:
-                index = col
-            else:  # must be FaceID.D:
-                index = self.cube.size - 1 - col
-
-        else:  # mast be Orientation.Z
-            index = row
+        index = self.cube.faces[face_id].find_move_index_from_real_indices(orientation, row, col)
 
         return Move(orientation, index, is_forward)
-
-
-if __name__ == '__main__':
-    gui = GUI(Cube(4))
-    gui.run()

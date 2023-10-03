@@ -1,16 +1,7 @@
-from enum import Enum, unique, auto
+from face_id import FaceID
 from color import Color
 from orientation import Orientation
-
-
-@unique
-class FaceID(Enum):
-    U = auto()
-    D = auto()
-    R = auto()
-    L = auto()
-    F = auto()
-    B = auto()
+from index_translator import IndexTranslator, TOP_DOWN, BOTTOM_UP, LEFT_RIGHT, RIGHT_LEFT
 
 
 class Face:
@@ -20,81 +11,113 @@ class Face:
 
         self.stickers = stickers
 
-    def get_strip_index_generator(self, orientation: Orientation, index: int):
+    def get_strip_index_translator(self, orientation: Orientation, index: int) -> IndexTranslator:
         """
-        Returns an index generator which contains the real indices in `self.stickers` of the specified orientation strip
-        on this face.
+        Returns an index translator to convert the i-th index of the specified strip to its actual index in
+        `self.stickers`.
 
         See:
             documentation/xyz orientation.png
 
-        Parameters:
-                orientation (int): Which strip orientation to return (specified in the documentation).
-                index (int): The index of the strip in the face (specified in the documentation).
-
-        Returns:
-            index generator: Generator of the real indices in `self.stickers` of the specified orientation strip on this
-             face.
+        :param orientation: Which strip orientation to return (specified in the documentation).
+        :param index: The index of the strip in the face (specified in the documentation).
+        :return: An index translator to convert the i-th index of the specified strip to its actual index in
+            `self.stickers`.
         """
         if orientation is Orientation.X:
             if self.face_id is FaceID.F:
-                index_generator = self._left_right_strip_indices_generator(index)
+                index_translator = IndexTranslator(LEFT_RIGHT, index, self.size)
             elif self.face_id is FaceID.R:
-                index_generator = self._bottom_up_strip_indices_generator(index)
+                index_translator = IndexTranslator(BOTTOM_UP, index, self.size)
             elif self.face_id is FaceID.B:
-                index_generator = self._right_left_strip_indices_generator(-index - 1)
+                index_translator = IndexTranslator(RIGHT_LEFT, (-index - 1) % self.size, self.size)
             elif self.face_id is FaceID.L:
-                index_generator = self._top_down_strip_indices_generator(-index - 1)
+                index_translator = IndexTranslator(TOP_DOWN, (-index - 1) % self.size, self.size)
             else:
-                raise Exception(Face._error_message_illegal_face_id_for_strip(self.face_id, orientation))
+                raise ValueError(Face._error_message_illegal_face_id_for_orientation(self.face_id, orientation))
 
-            return index_generator
+            return index_translator
 
         elif orientation is Orientation.Y:
             if self.face_id is FaceID.F or self.face_id is FaceID.U or self.face_id is FaceID.B:
-                index_generator = self._bottom_up_strip_indices_generator(index)
+                index_translator = IndexTranslator(BOTTOM_UP, index, self.size)
             elif self.face_id is FaceID.D:
-                index_generator = self._top_down_strip_indices_generator(-index - 1)
+                index_translator = IndexTranslator(TOP_DOWN, (-index - 1) % self.size, self.size)
             else:
-                raise Exception(Face._error_message_illegal_face_id_for_strip(self.face_id, orientation))
+                raise ValueError(Face._error_message_illegal_face_id_for_orientation(self.face_id, orientation))
 
-            return index_generator
+            return index_translator
 
         elif orientation is Orientation.Z:
             if (self.face_id is FaceID.D or self.face_id is FaceID.R or
                     self.face_id is FaceID.U or self.face_id is FaceID.L):
-                index_generator = self._right_left_strip_indices_generator(index)
+                index_translator = IndexTranslator(RIGHT_LEFT, index, self.size)
             else:
-                raise Exception(Face._error_message_illegal_face_id_for_strip(self.face_id, orientation))
+                raise ValueError(Face._error_message_illegal_face_id_for_orientation(self.face_id, orientation))
 
-            return index_generator
+            return index_translator
 
         else:
-            raise NotImplemented(Orientation.not_recognized_orientation_error_msg(orientation))
+            raise ValueError(Orientation.not_recognized_orientation_error_msg(orientation))
 
     def get_strip(self, orientation: Orientation, index) -> list[Color]:
-        return [self.stickers[row][col] for row, col in self.get_strip_index_generator(orientation, index)]
+        strip = []
+        index_translator = self.get_strip_index_translator(orientation, index)
+        for i in range(self.size):
+            row, col = index_translator.translate(i)
+            strip.append(self.stickers[row][col])
+        return strip
 
     def set_strip(self, orientation: Orientation, index, new_strip) -> None:
-        index_generator = self.get_strip_index_generator(orientation, index)
-        for i, indices in enumerate(index_generator):
-            row, col = indices
+        index_translator = self.get_strip_index_translator(orientation, index)
+        for i in range(self.size):
+            row, col = index_translator.translate(i)
             self.stickers[row][col] = new_strip[i]
 
-    def _top_down_strip_indices_generator(self, index: int):
-        return ((i, index) for i in range(self.size))
+    def find_move_index_from_real_indices(self, move_orientation: Orientation, row: int, col: int) -> int:
+        illegal_face_id_for_orientation = False
+        index = -1
 
-    def _bottom_up_strip_indices_generator(self, index: int):
-        return ((self.size - 1 - i, index) for i in range(self.size))
+        if move_orientation is Orientation.X:
+            if self.face_id is FaceID.F:
+                index = row
+            elif self.face_id is FaceID.R:
+                index = col
+            elif self.face_id is FaceID.B:
+                index = self.size - 1 - row
+            elif self.face_id is FaceID.L:
+                index = self.size - 1 - col
+            else:
+                illegal_face_id_for_orientation = True
 
-    def _left_right_strip_indices_generator(self, index: int):
-        return ((index, i) for i in range(self.size))
+        elif move_orientation is Orientation.Y:
+            if self.face_id is FaceID.F or self.face_id is FaceID.U or self.face_id is FaceID.B:
+                index = col
+            elif self.face_id is FaceID.D:
+                index = self.size - 1 - col
+            else:
+                illegal_face_id_for_orientation = True
 
-    def _right_left_strip_indices_generator(self, index: int):
-        return ((index, self.size - 1 - i) for i in range(self.size))
+        elif move_orientation is Orientation.Z:
+            if (self.face_id is FaceID.D or self.face_id is FaceID.R or
+                    self.face_id is FaceID.U or self.face_id is FaceID.L):
+                index = row
+            else:
+                illegal_face_id_for_orientation = True
+        else:
+            raise ValueError(Orientation.not_recognized_orientation_error_msg(move_orientation))
+
+        if illegal_face_id_for_orientation:
+            raise ValueError(Face._error_message_illegal_face_id_for_orientation(self.face_id, move_orientation))
+
+        return index
+
+    ####################################################################################################################
 
     def rotate_face(self, clockwise: bool):
-        """90 degrees rotation"""
+        """
+        90 degrees rotation of `self.stickers`.
+        """
         stickers = self.stickers
 
         if clockwise:
@@ -107,8 +130,8 @@ class Face:
         self.stickers = stickers
 
     @staticmethod
-    def _error_message_illegal_face_id_for_strip(face_id: FaceID, required_orientation: Orientation) -> str:
-        return f"The face {face_id.name!r} does not support {required_orientation.name!r} orientation stripes."
+    def _error_message_illegal_face_id_for_orientation(face_id: FaceID, required_orientation: Orientation) -> str:
+        return f"The face {face_id.name!r} does not support {required_orientation.name!r} orientation."
 
     def __getitem__(self, item: int) -> list[Color]:
         return self.stickers[item]
