@@ -1,7 +1,7 @@
-from face_id import FaceID
 from color import Color
-from orientation import Orientation
+from face_id import FaceID
 from index_translator import IndexTranslator, TOP_DOWN, BOTTOM_UP, LEFT_RIGHT, RIGHT_LEFT
+from orientation import Orientation
 
 
 class Face:

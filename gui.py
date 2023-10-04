@@ -1,3 +1,5 @@
+from typing import Union
+
 import pygame as pg
 
 from color import Color
@@ -5,6 +7,8 @@ from cube import Cube
 from face_id import FaceID
 from move import Move
 from orientation import Orientation
+from solver import Solver
+from solver_3x3 import Solver3x3
 
 BACKGROUND_COLOR = (5, 5, 5, 255)
 NO_COLOR = (0, 0, 0, 0)
@@ -27,6 +31,10 @@ class GUI:
         self.screen_size = (
             4 * self.full_face_size + face_extra_size + screen_extra_size * 2,
             3 * self.full_face_size + face_extra_size + screen_extra_size * 2)
+
+        self.solver: Union[Solver, None] = None
+        if self.cube.size == 3:
+            self.solver = Solver3x3(self.cube)
 
     def run(self):
         pg.init()
@@ -66,6 +74,11 @@ class GUI:
                 if event.type == pg.KEYDOWN:
                     if event.key == pg.K_ESCAPE:
                         done = True
+                    if event.key == pg.K_s and self.solver is not None:
+                        self.solver.solve()
+                    if event.key == pg.K_r:
+                        shuffle_moves = self.cube.generate_shuffle_moves(100)
+                        self.cube.execute_moves(shuffle_moves)
 
             GUI._update_screen(screen, background, foreground, overlay)
 

@@ -1,6 +1,9 @@
+import random
+
 from color import Color
 from face import Face
 from face_id import FaceID, LEFT, UP, RIGHT, DOWN
+from location import Location
 from move import Move
 from orientation import Orientation
 
@@ -20,6 +23,17 @@ class Cube:
                 faces[face_id] = Face(size, face_id, stickers)
 
         self.faces: dict[FaceID, Face] = faces
+
+    def generate_shuffle_moves(self, moves_number: int) -> list[Move]:
+        moves: list[Move] = []
+        for _ in range(moves_number):
+            orientation = random.choice([Orientation.X, Orientation.Y, Orientation.Z])
+            index = random.randint(0, self.size - 1)
+            is_forward = random.choice([True, False])
+            move = Move(orientation, index, is_forward)
+
+            moves.append(move)
+        return moves
 
     def move(self, move: Move) -> None:
         effected_faces = Orientation.get_orientation_rotation_faces_ids(move.orientation)
@@ -52,16 +66,49 @@ class Cube:
             elif move.orientation is Orientation.Z:
                 self.faces[FaceID.F].rotate_face(not move.is_forward)
 
-    def find_other_sticker_locations(self, sticker_face: FaceID, row: int, col: int) -> list[list[FaceID, int, int]]:
+    def execute_moves(self, moves: list[Move]) -> None:
+        for move in moves:
+            self.move(move)
+
+    def trace_a_moved_sticker(self, original_location: Location, move: Move) -> Location:
+        """
+        Returns where `original_location` will be after the move `move` would be applied (Not applies `move` on the
+        cube). `original_location` must be a location that moves to a new face after the move `move` would be applied.
+        Otherwise, a `ValueError` would be raised.
+        :param original_location: The location to trace.
+        :param move: The move to trace the location with.
+        :return: The location where `original_location` will be in after the move `move` would be applied.
+        """
+        effected_faces = Orientation.get_orientation_rotation_faces_ids(move.orientation)
+        if original_location.face_id not in effected_faces or self.faces[
+            original_location.face_id].find_move_index_from_real_indices(move.orientation,
+                                                                         original_location.row,
+                                                                         original_location.col) != move.index:
+            raise ValueError("The given location does not move to another face.")
+
+        direction = 1 if move.is_forward else -1
+        new_face_id = effected_faces[
+            (effected_faces.index(original_location.face_id) + direction) % len(effected_faces)]
+
+        curr_index_translator = self.faces[original_location.face_id].get_strip_index_translator(
+            move.orientation, move.index)
+        new_index_translator = self.faces[new_face_id].get_strip_index_translator(move.orientation, move.index)
+
+        i = curr_index_translator.inverse((original_location.row, original_location.col))
+        new_row, new_col = new_index_translator.translate(i)
+
+        return Location(new_face_id, new_row, new_col)
+
+    def get_other_sticker_locations(self, sticker_location: Location) -> list[Location]:
         """
         Finds the other locations (face_id, row, col) of a given edge sticker.
-        :param sticker_face: The known face of the sticker.
-        :param row: The row of the sticker in `sticker_face`.
-        :param col: The column of the sticker in `sticker_face`.
-        :return: A list contains the other locations (face_id, row, col) of the specified edge.
+        :param sticker_location: The known sticker location.
+        :return: A list contains the other locations of the specified edge.
         """
         if self.size <= 2:
             ValueError(f"Cube of size {self.size} does not have edge stickers.")
+
+        sticker_face, row, col = sticker_location.face_id, sticker_location.row, sticker_location.col
 
         adjacent_face_ids: list[FaceID] = []
 
@@ -74,25 +121,41 @@ class Cube:
         if col == self.size - 1:
             adjacent_face_ids.append(sticker_face.get_side_linked_face(RIGHT))
 
-        locations: list[list[FaceID, int, int]] = []
+        locations: list[Location] = []
 
         for adjacent_face_id in adjacent_face_ids:
-            move = self.get_needed_single_move(sticker_face, row, col, adjacent_face_id)
+            move = self.get_needed_single_move(sticker_location, adjacent_face_id)
             from_index_translator = self.faces[sticker_face].get_strip_index_translator(move.orientation, move.index)
             i = from_index_translator.inverse((row, col))
 
             adjacent_face = self.faces[adjacent_face_id]
             to_index_translator = adjacent_face.get_strip_index_translator(move.orientation, move.index)
             to_row, to_col = to_index_translator.opposite(i)
-            locations.append([adjacent_face_id, to_row, to_col])
+            locations.append(Location(adjacent_face_id, to_row, to_col))
 
         return locations
 
-    def get_needed_single_move(self, from_face_id: FaceID, from_row: int, from_col: int, to_face_id: FaceID) -> Move:
-        move_orientation, is_forward = Orientation.find_needed_single_move_orientation(from_face_id, to_face_id)
+    def get_needed_single_move(self, from_location: Location, to_face_id: FaceID) -> Move:
+        move_orientation, is_forward = Orientation.find_needed_single_move_orientation(from_location.face_id,
+                                                                                       to_face_id)
 
-        index = self.faces[from_face_id].find_move_index_from_real_indices(move_orientation, from_row, from_col)
+        index = self.faces[from_location.face_id].find_move_index_from_real_indices(move_orientation, from_location.row,
+                                                                                    from_location.col)
         return Move(move_orientation, index, is_forward)
+
+    def get_move_to_rotate_face(self, face_id: FaceID, clockwise: bool):
+        up_face_id = face_id.get_side_linked_face(UP)
+        right_face_id = face_id.get_side_linked_face(RIGHT)
+        left_face_id = face_id.get_side_linked_face(LEFT)
+
+        sticker_other_locations = self.get_other_sticker_locations(Location(face_id, 0, 0))
+        sticker_up_location = None
+        for sticker_location in sticker_other_locations:
+            if sticker_location.face_id is up_face_id:
+                sticker_up_location = sticker_location
+                break
+
+        return self.get_needed_single_move(sticker_up_location, right_face_id if clockwise else left_face_id)
 
     def __eq__(self, cube: 'Cube') -> bool:
         return self.faces == cube.faces

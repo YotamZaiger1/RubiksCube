@@ -6,3 +6,6 @@ class Move:
         self.orientation: Orientation = orientation
         self.index: int = index
         self.is_forward: bool = is_forward
+
+    def reversed(self) -> 'Move':
+        return Move(self.orientation, self.index, not self.is_forward)
