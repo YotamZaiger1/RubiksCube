@@ -45,3 +45,6 @@ class FaceID(Enum):
             return FaceID.L
 
         raise ValueError(f"Unknown FaceID {self!r}.")
+
+
+RING_FACE_IDS = [FaceID.F, FaceID.R, FaceID.B, FaceID.L]

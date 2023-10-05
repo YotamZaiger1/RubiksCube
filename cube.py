@@ -157,5 +157,14 @@ class Cube:
 
         return self.get_needed_single_move(sticker_up_location, right_face_id if clockwise else left_face_id)
 
+    def copy(self) -> 'Cube':
+        faces: dict[FaceID: Face] = dict()
+
+        for face_id in FaceID:
+            face: Face = self.faces[face_id]
+            faces[face_id] = face.copy()
+
+        return Cube(self.size, faces)
+
     def __eq__(self, cube: 'Cube') -> bool:
         return self.faces == cube.faces

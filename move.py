@@ -9,3 +9,9 @@ class Move:
 
     def reversed(self) -> 'Move':
         return Move(self.orientation, self.index, not self.is_forward)
+
+    def __repr__(self):
+        string = f"{self.orientation.name}{self.index}"
+        if not self.is_forward:
+            string += "b"
+        return string

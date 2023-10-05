@@ -6,3 +6,6 @@ class Location:
         self.face_id: FaceID = face_id
         self.row: int = row
         self.col: int = col
+
+    def __eq__(self, location: 'Location') -> bool:
+        return self.face_id is location.face_id and self.row == location.row and self.col == location.col

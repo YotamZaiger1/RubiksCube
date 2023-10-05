@@ -32,9 +32,11 @@ class GUI:
             4 * self.full_face_size + face_extra_size + screen_extra_size * 2,
             3 * self.full_face_size + face_extra_size + screen_extra_size * 2)
 
-        self.solver: Union[Solver, None] = None
+    def _get_solver(self) -> Union[Solver, None]:
+        solver: Union[Solver, None] = None
         if self.cube.size == 3:
-            self.solver = Solver3x3(self.cube)
+            solver = Solver3x3(self.cube)
+        return solver
 
     def run(self):
         pg.init()
@@ -74,8 +76,12 @@ class GUI:
                 if event.type == pg.KEYDOWN:
                     if event.key == pg.K_ESCAPE:
                         done = True
-                    if event.key == pg.K_s and self.solver is not None:
-                        self.solver.solve()
+                    if event.key == pg.K_s:
+                        solver = self._get_solver()
+                        if solver is not None:
+                            is_solvable, moves = solver.solve()
+                            self.cube.execute_moves(moves)
+
                     if event.key == pg.K_r:
                         shuffle_moves = self.cube.generate_shuffle_moves(100)
                         self.cube.execute_moves(shuffle_moves)

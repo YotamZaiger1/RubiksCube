@@ -129,6 +129,13 @@ class Face:
 
         self.stickers = stickers
 
+    def copy(self) -> 'Face':
+        stickers_copy = []
+        for row in self.stickers:
+            stickers_copy.append(row.copy())
+
+        return Face(self.size, self.face_id, stickers_copy)
+
     @staticmethod
     def _error_message_illegal_face_id_for_orientation(face_id: FaceID, required_orientation: Orientation) -> str:
         return f"The face {face_id.name!r} does not support {required_orientation.name!r} orientation."
