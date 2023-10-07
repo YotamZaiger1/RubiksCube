@@ -44,7 +44,27 @@ class Solver3x3(Solver):
             return Location(FaceID.U, 0, 0)
         if FaceID.L in ids and FaceID.F in ids:
             return Location(FaceID.U, 2, 0)
-        raise ValueError("The given face ids does not fit any corner.")
+        raise ValueError(f"The given face ids ({id_1}, {id_2}) does not fit any corner.")
+
+    @staticmethod
+    def get_down_corner_location(id_1: FaceID, id_2: FaceID) -> Location:
+        """
+        Returns the corner location in the D face which has parts in `id_1` and in `id_2` faces.
+        The order between `id_1` and `id_2` does not matter.
+        :param id_1: A ring face id.
+        :param id_2: A ring face id.
+        :return: The corner location in the D face which has parts in `id_1` and in `id_2` faces.
+        """
+        ids = [id_1, id_2]
+        if FaceID.F in ids and FaceID.R in ids:
+            return Location(FaceID.D, 2, 0)
+        if FaceID.R in ids and FaceID.B in ids:
+            return Location(FaceID.D, 0, 0)
+        if FaceID.B in ids and FaceID.L in ids:
+            return Location(FaceID.D, 0, 2)
+        if FaceID.L in ids and FaceID.F in ids:
+            return Location(FaceID.D, 2, 2)
+        raise ValueError(f"The given face ids ({id_1}, {id_2}) does not fit any corner.")
 
     def find_sticker_locations(self, colors: list[Color]) -> list[Location]:
         """
@@ -177,6 +197,25 @@ class Solver3x3(Solver):
         self._add_and_apply(moves, rotation_move)
 
         moves.extend(self._from_third_ring_corner_to_u(up_location, move_down_second_location))
+        return moves
+
+    def _d_cross_action(self, down_location: Location, move_up_first_location: Location,
+                        third_corner_location) -> list[Move]:
+        """
+        Calculates the needed moves to change the D face cross. Does not apply the moves to the cube.
+
+        :param down_location: The location of a corner sticker on the D face.
+        :param move_up_first_location: A location to specify which way to go up first. Must be on of the other sides
+            of `down_location`.
+        :param third_corner_location: The third location of the corner
+        :return: The needed moves for the process.
+        """
+        move_1 = self.cube.get_needed_single_move(down_location, move_up_first_location.face_id)
+        move_2 = self.cube.get_needed_single_move(down_location, third_corner_location.face_id)
+        move_3 = self.cube.get_needed_single_move(move_up_first_location, third_corner_location.face_id)
+
+        moves = [move_1, move_3, move_2.reversed(), move_3.reversed(), move_2, move_1.reversed()]
+
         return moves
 
     def solve_cross(self) -> list[Move]:
@@ -355,7 +394,68 @@ class Solver3x3(Solver):
         return moves
 
     def solve_d_cross(self) -> tuple[bool, list[Move]]:
-        return True, []
+        moves = []
+        down_color_locations = self._find_d_cross_locations()
+
+        if len(down_color_locations) % 2 == 1:
+            return False, moves
+
+        if len(down_color_locations) == 0:
+            d_cross_moves = self._d_cross_none()
+            moves.extend(d_cross_moves)
+            self.cube.execute_moves(d_cross_moves)
+
+            down_color_locations = self._find_d_cross_locations()
+
+        if len(down_color_locations) == 2:
+            first_loc, second_loc = down_color_locations
+            first_other_loc = self.cube.get_other_sticker_locations(first_loc)[0]
+            second_other_loc = self.cube.get_other_sticker_locations(second_loc)[0]
+
+            first_face_id, second_face_id = first_other_loc.face_id, second_other_loc.face_id
+            if first_face_id is second_face_id.opposite():
+                d_cross_moves = self._d_cross_line(first_face_id)
+            else:
+                d_cross_moves = self._d_cross_adjacent(first_face_id, second_face_id)
+            moves.extend(d_cross_moves)
+            self.cube.execute_moves(d_cross_moves)
+
+        return True, moves
+
+    def _find_d_cross_locations(self):
+        down_color = self.faces_colors[FaceID.D]
+        down_color_locations = []
+        for row, col in [[0, 1], [1, 0], [1, 2], [2, 1]]:
+            if self.cube.faces[FaceID.D][row][col] is down_color:
+                down_color_locations.append(Location(FaceID.D, row, col))
+        return down_color_locations
+
+    def _d_cross_none(self) -> list[Move]:
+        d_location = Location(FaceID.D, 0, 0)  # corner choice does not matter
+        second_loc, third_loc = self.cube.get_other_sticker_locations(d_location)
+
+        return self._d_cross_action(d_location, second_loc, third_loc)
+
+    def _d_cross_line(self, d_color_face_id: FaceID) -> list[Move]:
+        second_face_id = None
+        for face_id in RING_FACE_IDS:
+            if face_id is not d_color_face_id and face_id is not d_color_face_id.opposite():
+                second_face_id = face_id
+                break
+
+        d_location = Solver3x3.get_down_corner_location(d_color_face_id, second_face_id)
+        first_location, second_location = self.cube.get_other_sticker_locations(d_location)
+        if first_location.face_id is not d_color_face_id:
+            first_location, second_location = second_location, first_location
+
+        moves = self._d_cross_action(d_location, first_location, second_location)
+        moves.reverse()
+        return [move.reversed() for move in moves]
+
+    def _d_cross_adjacent(self, d_color_face_id_1: FaceID, d_color_face_id_2: FaceID) -> list[Move]:
+        d_location = Solver3x3.get_down_corner_location(d_color_face_id_1.opposite(), d_color_face_id_2.opposite())
+        first_location, second_location = self.cube.get_other_sticker_locations(d_location)
+        return self._d_cross_action(d_location, first_location, second_location)
 
     def solve_d_corner_positions(self) -> tuple[bool, list[Move]]:
         return True, []
