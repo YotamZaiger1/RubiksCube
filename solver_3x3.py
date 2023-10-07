@@ -20,11 +20,11 @@ class Solver3x3(Solver):
         for face_id in FaceID:
             self.color_faces[self.faces_colors[face_id]] = face_id
 
-        self.ring_corner_colors = []
+        self.ring_color_pairs = []
         for i in range(len(RING_FACE_IDS)):
             color_a = self.faces_colors[RING_FACE_IDS[i]]
             color_b = self.faces_colors[RING_FACE_IDS[(i + 1) % len(RING_FACE_IDS)]]
-            self.ring_corner_colors.append([color_a, color_b])
+            self.ring_color_pairs.append([color_a, color_b])
 
     @staticmethod
     def get_up_corner_location(id_1: FaceID, id_2: FaceID) -> Location:
@@ -102,6 +102,83 @@ class Solver3x3(Solver):
         moves += d_corners_moves
         return True, moves
 
+    def _get_rotation_moves_till_found(self, face_id_to_rotate: FaceID, location_to_trace: Location,
+                                       goal_face_id: FaceID) -> tuple[list[Move], Location]:
+        """
+        Calculate the fewest required moves to rotate `face_id_to_rotate` till `location_to_trace` will be in
+        `goal_face_id`. Does not apply any moves to `self.cube`.
+        :param face_id_to_rotate: The face that being rotated.
+        :param location_to_trace: The location to trace.
+        :param goal_face_id: The goal face id for `location_to_trace`
+        :return: A list with the fewest required moves to rotate `face_id_to_rotate` till `location_to_trace` will be in
+            `goal_face_id`. And the location of `location_to_trace` after the moves would be applied.
+        """
+        if location_to_trace.face_id is goal_face_id:
+            return [], location_to_trace
+
+        move = self.cube.get_move_to_rotate_face(face_id_to_rotate, True)
+        new_location = self.cube.trace_a_moved_sticker(location_to_trace, move)
+        if new_location.face_id is goal_face_id:
+            return [move], new_location
+
+        move = move.reversed()  # counterclockwise
+        new_location = self.cube.trace_a_moved_sticker(location_to_trace, move)
+        if new_location.face_id is goal_face_id:
+            return [move], new_location
+
+        new_location = self.cube.trace_a_moved_sticker(new_location, move)
+        return [move, move], new_location
+
+    def _from_third_ring_corner_to_u(self, up_location: Location, move_down_location: Location) -> list[Move]:
+        """
+        Calculates and applies the needed moves to move a sticker from the third ring corner (on the X2 move axis) to
+        `FaceID.U` face.
+        :param up_location: The goal up location.
+        :param move_down_location: A location to specify which way to go down. Must be on of the other sides of
+            `up_location`.
+        :return: The moves that were applied during the process.
+        """
+        moves: list[Move] = []
+
+        move = self.cube.get_needed_single_move(move_down_location, FaceID.D)
+        reversed_move = move.reversed()
+        up_location = self.cube.trace_a_moved_sticker(up_location, move)
+        move_down_location = self.cube.trace_a_moved_sticker(move_down_location, move)
+        self._add_and_apply(moves, move)
+
+        other_sticker_locations = self.cube.get_other_sticker_locations(up_location)
+        if other_sticker_locations[0] == move_down_location:
+            third_location: Location = other_sticker_locations[1]
+        else:
+            third_location: Location = other_sticker_locations[0]
+
+        move = self.cube.get_needed_single_move(up_location, third_location.face_id)
+        self._add_and_apply(moves, move)
+        self._add_and_apply(moves, reversed_move)
+
+        return moves
+
+    def _from_third_ring_edge_to_place(self, up_location: Location, move_down_first_location: Location,
+                                       move_down_second_location) -> list[Move]:
+
+        """
+        Calculates and applies the needed moves to move a sticker from the third ring edge (on the X2 move axis) to
+        its place.
+
+        :param up_location: The location of sticker on the U face which is above the goal location.
+        :param move_down_first_location: A location to specify which way to go down first. Must be on of the other sides
+            of `up_location`.
+        :param move_down_second_location: A location to specify which way to go down secondly. Must be on of the other
+            sides of `up_location`.
+        :return: The moves that were applied during the process.
+        """
+        moves = self._from_third_ring_corner_to_u(up_location, move_down_first_location)
+        rotation_move = moves[1]
+        self._add_and_apply(moves, rotation_move)
+
+        moves.extend(self._from_third_ring_corner_to_u(up_location, move_down_second_location))
+        return moves
+
     def solve_cross(self) -> list[Move]:
         up_color: Color = self.faces_colors[FaceID.U]
 
@@ -144,7 +221,8 @@ class Solver3x3(Solver):
                 move = self.cube.get_move_to_rotate_face(up_color_location.face_id, True)
                 ring_color_location = self.cube.trace_a_moved_sticker(ring_color_location, move)
                 ring_color_location = self.cube.trace_a_moved_sticker(ring_color_location, move)
-                up_color_location = self.cube.get_other_sticker_locations(ring_color_location)[0]
+                # up_color_location is now not updated
+
                 self._add_and_apply(place_ring_color_moves, move)
                 self._add_and_apply(place_ring_color_moves, move)
 
@@ -153,10 +231,11 @@ class Solver3x3(Solver):
                     self._add_and_apply(place_ring_color_moves, revered_move_1)
 
             # here both white location and ring color location are updated
-            move = self.cube.get_move_to_rotate_face(up_color_location.face_id, True)
-            while ring_color_location.face_id is not ring_face_id:
-                ring_color_location = self.cube.trace_a_moved_sticker(ring_color_location, move)
-                self._add_and_apply(place_ring_color_moves, move)
+            rotation_moves, ring_color_location = self._get_rotation_moves_till_found(FaceID.D,
+                                                                                      ring_color_location,
+                                                                                      ring_face_id)
+            place_ring_color_moves.extend(rotation_moves)
+            self.cube.execute_moves(rotation_moves)
 
             move = self.cube.get_move_to_rotate_face(ring_color_location.face_id, True)
             self._add_and_apply(place_ring_color_moves, move)
@@ -170,7 +249,7 @@ class Solver3x3(Solver):
         moves = []
         up_color = self.faces_colors[FaceID.U]
 
-        for corner_other_colors in self.ring_corner_colors:
+        for corner_other_colors in self.ring_color_pairs:
             place_corner_moves = []
 
             first_color, second_color = corner_other_colors
@@ -190,10 +269,10 @@ class Solver3x3(Solver):
 
             elif up_color_location.face_id is FaceID.D:
                 # put the up_color_location under its gaol location
-                move = self.cube.get_move_to_rotate_face(FaceID.D, True)
-                while first_loc.face_id is not self.color_faces[second_color]:
-                    first_loc = self.cube.trace_a_moved_sticker(first_loc, move)
-                    self._add_and_apply(place_corner_moves, move)
+                rotation_moves, first_loc = self._get_rotation_moves_till_found(FaceID.D, first_loc,
+                                                                                self.color_faces[second_color])
+                place_corner_moves.extend(rotation_moves)
+                self.cube.execute_moves(rotation_moves)
 
                 goal_location = Solver3x3.get_up_corner_location(self.color_faces[first_color],
                                                                  self.color_faces[second_color])
@@ -210,10 +289,10 @@ class Solver3x3(Solver):
                 down_loc, second_loc = second_loc, down_loc
                 down_color = second_color
 
-            move = self.cube.get_move_to_rotate_face(FaceID.D, True)
-            while second_loc.face_id is not self.color_faces[down_color]:
-                second_loc = self.cube.trace_a_moved_sticker(second_loc, move)
-                self._add_and_apply(place_corner_moves, move)
+            rotation_moves, second_loc = self._get_rotation_moves_till_found(FaceID.D, second_loc,
+                                                                             self.color_faces[down_color])
+            place_corner_moves.extend(rotation_moves)
+            self.cube.execute_moves(rotation_moves)
 
             goal_location = Solver3x3.get_up_corner_location(self.color_faces[first_color],
                                                              self.color_faces[second_color])
@@ -229,37 +308,51 @@ class Solver3x3(Solver):
 
         return moves
 
-    def _from_third_ring_corner_to_u(self, up_location: Location, move_down_location: Location) -> list[Move]:
-        """
-        Calculates and applies the needed moves to move a sticker from the third ring corner (on the X2 move axis) to
-        `FaceID.U` face.
-        :param up_location: The goal up location.
-        :param move_down_location: The location to specify which way to go down. Must be on of the other sides of
-            `up_location`.
-        :return: The moves that were applied during the process.
-        """
-        moves: list[Move] = []
+    def solve_second_x_strip(self) -> list[Move]:
+        moves = []
 
-        move = self.cube.get_needed_single_move(move_down_location, FaceID.D)
-        reversed_move = move.reversed()
-        up_location = self.cube.trace_a_moved_sticker(up_location, move)
-        move_down_location = self.cube.trace_a_moved_sticker(move_down_location, move)
-        self._add_and_apply(moves, move)
+        for edge_colors in self.ring_color_pairs:
+            place_edge_moves = []
+            first_color, second_color = edge_colors
+            first_goal_id, second_goal_id = self.color_faces[first_color], self.color_faces[second_color]
 
-        other_sticker_locations = self.cube.get_other_sticker_locations(up_location)
-        if other_sticker_locations[0] == move_down_location:
-            third_location: Location = other_sticker_locations[1]
-        else:
-            third_location: Location = other_sticker_locations[0]
+            first_loc, second_loc = self.find_sticker_locations(edge_colors)
 
-        move = self.cube.get_needed_single_move(up_location, third_location.face_id)
-        self._add_and_apply(moves, move)
-        self._add_and_apply(moves, reversed_move)
+            if first_loc.face_id is first_goal_id and second_loc.face_id is second_goal_id:
+                continue
+
+            if first_loc.face_id in RING_FACE_IDS and second_loc.face_id in RING_FACE_IDS:
+                up_location = self.get_up_corner_location(first_loc.face_id, second_loc.face_id)
+                up_other_locations = self.cube.get_other_sticker_locations(up_location)
+
+                place_edge_moves.extend(
+                    self._from_third_ring_edge_to_place(up_location, up_other_locations[0], up_other_locations[1]))
+                first_loc, second_loc = self.find_sticker_locations(edge_colors)
+
+            # sticker is now in the X2 strip
+            up_location = self.get_up_corner_location(first_goal_id, second_goal_id)
+            up_other_locations = self.cube.get_other_sticker_locations(up_location)
+
+            # make the firs location and its parameters be the location in the ring side:
+            if first_loc.face_id is FaceID.D:
+                first_loc, second_loc = second_loc, first_loc
+                first_goal_id, second_goal_id = second_goal_id, first_goal_id
+            if up_other_locations[0].face_id is not first_goal_id:
+                up_other_locations.reverse()
+            # first_color and second_color are now not updated
+
+            rotation_target_face_id = second_goal_id.opposite()
+            rotation_moves, new_location = self._get_rotation_moves_till_found(FaceID.D, first_loc,
+                                                                               rotation_target_face_id)
+            place_edge_moves.extend(rotation_moves)
+            self.cube.execute_moves(rotation_moves)
+
+            place_edge_moves.extend(
+                self._from_third_ring_edge_to_place(up_location, up_other_locations[0], up_other_locations[1]))
+
+            moves.extend(place_edge_moves)
 
         return moves
-
-    def solve_second_x_strip(self) -> list[Move]:
-        return []
 
     def solve_d_cross(self) -> tuple[bool, list[Move]]:
         return True, []
@@ -269,5 +362,3 @@ class Solver3x3(Solver):
 
     def solve_d_corners(self) -> list[Move]:
         return []
-
-# todo: generalize while loop search for correct spot in a strip. -> reduce moves to solve
