@@ -157,6 +157,33 @@ class Cube:
 
         return self.get_needed_single_move(sticker_up_location, right_face_id if clockwise else left_face_id)
 
+    def get_rotation_moves_till_found(self, face_id_to_rotate: FaceID, location_to_trace: Location,
+                                      goal_face_id: FaceID) -> tuple[list[Move], Location]:
+        """
+        Calculate the fewest required moves to rotate `face_id_to_rotate` till `location_to_trace` will be in
+        `goal_face_id`. Does not apply any moves to `self.cube`.
+        :param face_id_to_rotate: The face that being rotated.
+        :param location_to_trace: The location to trace.
+        :param goal_face_id: The goal face id for `location_to_trace`
+        :return: A list with the fewest required moves to rotate `face_id_to_rotate` till `location_to_trace` will be in
+            `goal_face_id`. And the location of `location_to_trace` after the moves would be applied.
+        """
+        if location_to_trace.face_id is goal_face_id:
+            return [], location_to_trace
+
+        move = self.get_move_to_rotate_face(face_id_to_rotate, True)
+        new_location = self.trace_a_moved_sticker(location_to_trace, move)
+        if new_location.face_id is goal_face_id:
+            return [move], new_location
+
+        move = move.reversed()  # counterclockwise
+        new_location = self.trace_a_moved_sticker(location_to_trace, move)
+        if new_location.face_id is goal_face_id:
+            return [move], new_location
+
+        new_location = self.trace_a_moved_sticker(new_location, move)
+        return [move, move], new_location
+
     def copy(self) -> 'Cube':
         faces: dict[FaceID: Face] = dict()
 

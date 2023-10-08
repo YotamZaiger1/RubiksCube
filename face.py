@@ -145,3 +145,9 @@ class Face:
 
     def __eq__(self, other: 'Face'):
         return self.stickers == other.stickers
+
+    def __repr__(self):
+        string = f"{self.face_id.name} Face:\n"
+        for row in range(self.size):
+            string += f"\t{self.stickers[row]}\n"
+        return string

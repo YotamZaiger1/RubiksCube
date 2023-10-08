@@ -9,3 +9,6 @@ class Location:
 
     def __eq__(self, location: 'Location') -> bool:
         return self.face_id is location.face_id and self.row == location.row and self.col == location.col
+
+    def __repr__(self):
+        return f"{self.face_id.name}({self.row}, {self.col})"

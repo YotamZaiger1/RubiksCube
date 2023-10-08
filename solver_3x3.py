@@ -20,11 +20,13 @@ class Solver3x3(Solver):
         for face_id in FaceID:
             self.color_faces[self.faces_colors[face_id]] = face_id
 
-        self.ring_color_pairs = []
+        self.ring_color_pairs: list[list[Color]] = []
+        self.ring_colors: list[Color] = []
         for i in range(len(RING_FACE_IDS)):
             color_a = self.faces_colors[RING_FACE_IDS[i]]
             color_b = self.faces_colors[RING_FACE_IDS[(i + 1) % len(RING_FACE_IDS)]]
             self.ring_color_pairs.append([color_a, color_b])
+            self.ring_colors.append(color_a)
 
     @staticmethod
     def get_up_corner_location(id_1: FaceID, id_2: FaceID) -> Location:
@@ -113,6 +115,9 @@ class Solver3x3(Solver):
         if not can_solve_d_cross:
             return False, moves
 
+        d_cross_positions = self.solve_d_cross_positions()
+        moves += d_cross_positions
+
         can_solve_d_corner_positions, d_corner_position_moves = self.solve_d_corner_positions()
         moves += d_corner_position_moves
         if not can_solve_d_corner_positions:
@@ -121,33 +126,6 @@ class Solver3x3(Solver):
         d_corners_moves = self.solve_d_corners()
         moves += d_corners_moves
         return True, moves
-
-    def _get_rotation_moves_till_found(self, face_id_to_rotate: FaceID, location_to_trace: Location,
-                                       goal_face_id: FaceID) -> tuple[list[Move], Location]:
-        """
-        Calculate the fewest required moves to rotate `face_id_to_rotate` till `location_to_trace` will be in
-        `goal_face_id`. Does not apply any moves to `self.cube`.
-        :param face_id_to_rotate: The face that being rotated.
-        :param location_to_trace: The location to trace.
-        :param goal_face_id: The goal face id for `location_to_trace`
-        :return: A list with the fewest required moves to rotate `face_id_to_rotate` till `location_to_trace` will be in
-            `goal_face_id`. And the location of `location_to_trace` after the moves would be applied.
-        """
-        if location_to_trace.face_id is goal_face_id:
-            return [], location_to_trace
-
-        move = self.cube.get_move_to_rotate_face(face_id_to_rotate, True)
-        new_location = self.cube.trace_a_moved_sticker(location_to_trace, move)
-        if new_location.face_id is goal_face_id:
-            return [move], new_location
-
-        move = move.reversed()  # counterclockwise
-        new_location = self.cube.trace_a_moved_sticker(location_to_trace, move)
-        if new_location.face_id is goal_face_id:
-            return [move], new_location
-
-        new_location = self.cube.trace_a_moved_sticker(new_location, move)
-        return [move, move], new_location
 
     def _from_third_ring_corner_to_u(self, up_location: Location, move_down_location: Location) -> list[Move]:
         """
@@ -186,9 +164,9 @@ class Solver3x3(Solver):
         its place.
 
         :param up_location: The location of sticker on the U face which is above the goal location.
-        :param move_down_first_location: A location to specify which way to go down first. Must be on of the other sides
+        :param move_down_first_location: A location to specify which way to go down first. Must be one of the other sides
             of `up_location`.
-        :param move_down_second_location: A location to specify which way to go down secondly. Must be on of the other
+        :param move_down_second_location: A location to specify which way to go down secondly. Must be one of the other
             sides of `up_location`.
         :return: The moves that were applied during the process.
         """
@@ -205,9 +183,9 @@ class Solver3x3(Solver):
         Calculates the needed moves to change the D face cross. Does not apply the moves to the cube.
 
         :param down_location: The location of a corner sticker on the D face.
-        :param move_up_first_location: A location to specify which way to go up first. Must be on of the other sides
+        :param move_up_first_location: A location to specify which way to go up first. Must be one of the other sides
             of `down_location`.
-        :param third_corner_location: The third location of the corner
+        :param third_corner_location: The third location of the corner.
         :return: The needed moves for the process.
         """
         move_1 = self.cube.get_needed_single_move(down_location, move_up_first_location.face_id)
@@ -215,6 +193,25 @@ class Solver3x3(Solver):
         move_3 = self.cube.get_needed_single_move(move_up_first_location, third_corner_location.face_id)
 
         moves = [move_1, move_3, move_2.reversed(), move_3.reversed(), move_2, move_1.reversed()]
+
+        return moves
+
+    def _d_edges_replacement(self, down_location: Location, move_down_location: Location,
+                             third_corner_location) -> list[Move]:
+        """
+        Calculates the needed moves to replace positions between 2 D edges. Does not apply the moves to the cube.
+
+        :param down_location: The location of a corner sticker on the D face.
+        :param move_down_location: A location to specify which way to go down first. Must be one of the other sides
+            of `down_location`.
+        :param third_corner_location: The third location of the corner.
+        :return: The needed moves for the process.
+        """
+        move_1 = self.cube.get_needed_single_move(move_down_location, down_location.face_id)
+        move_2 = self.cube.get_needed_single_move(third_corner_location, move_down_location.face_id)
+
+        moves = [move_1, move_2, move_2, move_1.reversed(), move_2.reversed(), move_1, move_2.reversed(),
+                 move_1.reversed()]
 
         return moves
 
@@ -270,9 +267,9 @@ class Solver3x3(Solver):
                     self._add_and_apply(place_ring_color_moves, revered_move_1)
 
             # here both white location and ring color location are updated
-            rotation_moves, ring_color_location = self._get_rotation_moves_till_found(FaceID.D,
-                                                                                      ring_color_location,
-                                                                                      ring_face_id)
+            rotation_moves, ring_color_location = self.cube.get_rotation_moves_till_found(FaceID.D,
+                                                                                          ring_color_location,
+                                                                                          ring_face_id)
             place_ring_color_moves.extend(rotation_moves)
             self.cube.execute_moves(rotation_moves)
 
@@ -308,8 +305,8 @@ class Solver3x3(Solver):
 
             elif up_color_location.face_id is FaceID.D:
                 # put the up_color_location under its gaol location
-                rotation_moves, first_loc = self._get_rotation_moves_till_found(FaceID.D, first_loc,
-                                                                                self.color_faces[second_color])
+                rotation_moves, first_loc = self.cube.get_rotation_moves_till_found(FaceID.D, first_loc,
+                                                                                    self.color_faces[second_color])
                 place_corner_moves.extend(rotation_moves)
                 self.cube.execute_moves(rotation_moves)
 
@@ -328,8 +325,8 @@ class Solver3x3(Solver):
                 down_loc, second_loc = second_loc, down_loc
                 down_color = second_color
 
-            rotation_moves, second_loc = self._get_rotation_moves_till_found(FaceID.D, second_loc,
-                                                                             self.color_faces[down_color])
+            rotation_moves, second_loc = self.cube.get_rotation_moves_till_found(FaceID.D, second_loc,
+                                                                                 self.color_faces[down_color])
             place_corner_moves.extend(rotation_moves)
             self.cube.execute_moves(rotation_moves)
 
@@ -381,8 +378,8 @@ class Solver3x3(Solver):
             # first_color and second_color are now not updated
 
             rotation_target_face_id = second_goal_id.opposite()
-            rotation_moves, new_location = self._get_rotation_moves_till_found(FaceID.D, first_loc,
-                                                                               rotation_target_face_id)
+            rotation_moves, new_location = self.cube.get_rotation_moves_till_found(FaceID.D, first_loc,
+                                                                                   rotation_target_face_id)
             place_edge_moves.extend(rotation_moves)
             self.cube.execute_moves(rotation_moves)
 
@@ -456,6 +453,60 @@ class Solver3x3(Solver):
         d_location = Solver3x3.get_down_corner_location(d_color_face_id_1.opposite(), d_color_face_id_2.opposite())
         first_location, second_location = self.cube.get_other_sticker_locations(d_location)
         return self._d_cross_action(d_location, first_location, second_location)
+
+    def solve_d_cross_positions(self) -> list[Move]:
+        moves = []
+        rotation_fitting_locations = self._d_cross_positions_find_edges()
+
+        if len(rotation_fitting_locations) == 0:
+            d_location = Location(FaceID.D, 0, 0)  # corner choice does not matter
+            first_location, second_location = self.cube.get_other_sticker_locations(d_location)
+            edge_replacement_moves = self._d_edges_replacement(d_location, first_location, second_location)
+            moves.extend(edge_replacement_moves)
+            self.cube.execute_moves(edge_replacement_moves)
+            rotation_fitting_locations = self._d_cross_positions_find_edges()
+
+        if len(rotation_fitting_locations) == 2:
+            first_fitting_location, second_fitting_location = rotation_fitting_locations
+            d_location = Solver3x3.get_down_corner_location(first_fitting_location.face_id.opposite(),
+                                                            second_fitting_location.face_id.opposite())
+            first_location, second_location = self.cube.get_other_sticker_locations(d_location)
+            edge_replacement_moves = self._d_edges_replacement(d_location, first_location, second_location)
+            moves.extend(edge_replacement_moves)
+            self.cube.execute_moves(edge_replacement_moves)
+
+        location = Location(FaceID.F, 2, 1)  # an edge location from D face
+        found_color = self.cube.faces[location.face_id][location.row][location.col]
+        target_face_id = self.color_faces[found_color]
+        rotation_moves, location = self.cube.get_rotation_moves_till_found(FaceID.D, location, target_face_id)
+        moves.extend(rotation_moves)
+        self.cube.execute_moves(rotation_moves)
+
+        return moves
+
+    def _d_cross_positions_find_edges(self) -> list[Location]:
+        """
+        Finds the locations of the ring-colored-D edges which are in the correct position relative to the other D edges.
+        :return: A list contains the locations of the ring-colored-D edges which are in the correct position relative to
+            the other D edges.
+        """
+        ring_locations = [Location(FaceID.F, 2, 1), Location(FaceID.R, 1, 2), Location(FaceID.B, 0, 1),
+                          Location(FaceID.L, 1, 0)]
+        found_ring_colors = [self.cube.faces[location.face_id][location.row][location.col] for location in
+                             ring_locations]
+
+        rotation_fitting_locations = []
+        for i in range(len(self.ring_colors)):
+            index_1 = found_ring_colors.index(self.ring_colors[i])
+            index_2 = found_ring_colors.index(self.ring_colors[(i + 1) % len(self.ring_colors)])
+            if (index_1 + 1) % len(self.ring_colors) == index_2:
+                if len(rotation_fitting_locations):
+                    return ring_locations
+
+                rotation_fitting_locations.append(ring_locations[index_1])
+                rotation_fitting_locations.append(ring_locations[index_2])
+
+        return rotation_fitting_locations
 
     def solve_d_corner_positions(self) -> tuple[bool, list[Move]]:
         return True, []
