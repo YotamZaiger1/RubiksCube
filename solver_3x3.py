@@ -229,11 +229,36 @@ class Solver3x3(Solver):
 
         down_move_1 = self.cube.get_needed_single_move(move_down_location, down_location.face_id)
 
-        after_move_1_ring_location = self.cube.trace_a_moved_sticker(third_corner_location, rotation_move)
-        down_move_2 = self.cube.get_needed_single_move(after_move_1_ring_location, down_location.face_id)
+        after_rotation_move_ring_location = self.cube.trace_a_moved_sticker(third_corner_location, rotation_move)
+        down_move_2 = self.cube.get_needed_single_move(after_rotation_move_ring_location, down_location.face_id)
 
         moves = [rotation_move, down_move_1, rotation_move.reversed(), down_move_2, rotation_move,
                  down_move_1.reversed(), rotation_move.reversed(), down_move_2.reversed()]
+
+        return moves
+
+    def _change_d_corners_orientation(self, down_location: Location, move_down_location: Location,
+                                      third_corner_location) -> list[Move]:
+        """
+        Calculates the needed moves to change the orientation of 2 D corners. Does not apply the moves to the cube.
+
+        :param down_location: The location of a corner sticker on the D face.
+        :param move_down_location: A location to specify which way to go down first. Must be one of the other sides
+            of `down_location`.
+        :param third_corner_location: The third location of the corner.
+        :return: The needed moves for the process.
+        """
+        rotation_move = self.cube.get_needed_single_move(third_corner_location, move_down_location.face_id)
+
+        after_rotation_move_ring_location_1 = self.cube.trace_a_moved_sticker(third_corner_location, rotation_move)
+        after_rotation_move_ring_location_2 = self.cube.trace_a_moved_sticker(move_down_location, rotation_move)
+        other_locations = self.cube.get_other_sticker_locations(after_rotation_move_ring_location_1)
+        other_locations.remove(after_rotation_move_ring_location_2)
+        second_down_location = other_locations[0]
+
+        moves = (self._d_edges_replacement(down_location, move_down_location, third_corner_location) +
+                 self._d_edges_replacement(second_down_location, after_rotation_move_ring_location_1,
+                                           after_rotation_move_ring_location_2))
 
         return moves
 
@@ -567,6 +592,12 @@ class Solver3x3(Solver):
         return True, moves
 
     def _d_corner_positions_find_locations(self) -> tuple[list[Location], list[Location]]:
+        """
+        Finds the locations of the ring-colored-D corners which are in the correct place (but may not be in the correct
+        orientation).
+        :return: 2 lists, the first contains the D-locations of the fitting corners, the second contains the D-locations
+            of the unfitting corners.
+        """
         fitting_locations = []
         unfitting_locations = []
         for first_color, second_color in self.ring_color_pairs:
