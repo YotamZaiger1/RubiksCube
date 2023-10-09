@@ -10,6 +10,10 @@ class Move:
     def reversed(self) -> 'Move':
         return Move(self.orientation, self.index, not self.is_forward)
 
+    def __eq__(self, other: 'Move') -> bool:
+        return (self.orientation is other.orientation and self.index == other.index and
+                self.is_forward == other.is_forward)
+
     def __repr__(self):
         string = f"{self.orientation.name}{self.index}"
         if not self.is_forward:

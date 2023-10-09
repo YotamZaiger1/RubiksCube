@@ -99,6 +99,9 @@ class Cube:
 
         return Location(new_face_id, new_row, new_col)
 
+    def get_location_color(self, location: Location) -> Color:
+        return self.faces[location.face_id][location.row][location.col]
+
     def get_other_sticker_locations(self, sticker_location: Location) -> list[Location]:
         """
         Finds the other locations (face_id, row, col) of a given edge sticker.
@@ -161,7 +164,7 @@ class Cube:
                                       goal_face_id: FaceID) -> tuple[list[Move], Location]:
         """
         Calculate the fewest required moves to rotate `face_id_to_rotate` till `location_to_trace` will be in
-        `goal_face_id`. Does not apply any moves to `self.cube`.
+        `goal_face_id`. Does not apply any move to `self.cube`.
         :param face_id_to_rotate: The face that being rotated.
         :param location_to_trace: The location to trace.
         :param goal_face_id: The goal face id for `location_to_trace`
