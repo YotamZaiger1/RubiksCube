@@ -122,9 +122,9 @@ class Solver3x3(Solver):
         if not can_solve_d_corner_positions:
             return False, moves
 
-        d_corners_moves = self.solve_d_corners()
-        moves += d_corners_moves
-        return True, moves
+        can_solve_d_corner_orientations, d_corners_orientation_moves = self.solve_d_corner_orientations()
+        moves += d_corners_orientation_moves
+        return can_solve_d_corner_orientations, moves
 
     def _from_third_ring_corner_to_u(self, up_location: Location, move_down_location: Location) -> list[Move]:
         """
@@ -493,8 +493,7 @@ class Solver3x3(Solver):
             first_location, second_location = second_location, first_location
 
         moves = self._d_cross_action(d_location, first_location, second_location)
-        moves.reverse()
-        return [move.reversed() for move in moves]
+        return Move.get_inverted_moves(moves)
 
     def _d_cross_adjacent(self, d_color_face_id_1: FaceID, d_color_face_id_2: FaceID) -> list[Move]:
         d_location = Solver3x3.get_down_corner_location(d_color_face_id_1.opposite(), d_color_face_id_2.opposite())
@@ -616,5 +615,111 @@ class Solver3x3(Solver):
 
         return fitting_locations, unfitting_locations
 
-    def solve_d_corners(self) -> list[Move]:
-        return []
+    def solve_d_corner_orientations(self) -> tuple[bool, list[Move]]:
+        ring_face_id_pairs = [[FaceID.R, FaceID.B], [FaceID.B, FaceID.L], [FaceID.F, FaceID.R], [FaceID.L, FaceID.F]]
+        down_corner_locations = [self.get_down_corner_location(id1, id2) for id1, id2 in ring_face_id_pairs]
+
+        x, y, z, w = [self._get_d_corner_orientation_value(location) for location in down_corner_locations]
+        if (x + w) % 3 != (y + z) % 3:
+            return False, []
+
+        a, b, g, d = self._d_corner_orientation_find_best_abgd(x, z, w)
+        moves = []
+        moves.extend(
+            self._d_corner_orientation_convert_v_to_sub_step_moves(a, 2,
+                                                                   self.get_down_corner_location(FaceID.R, FaceID.F),
+                                                                   FaceID.F))
+        moves.extend(
+            self._d_corner_orientation_convert_v_to_sub_step_moves(b, 2,
+                                                                   self.get_down_corner_location(FaceID.L, FaceID.F),
+                                                                   FaceID.F))
+        moves.extend(
+            self._d_corner_orientation_convert_v_to_sub_step_moves(g, 1,
+                                                                   self.get_down_corner_location(FaceID.L, FaceID.B),
+                                                                   FaceID.L))
+        moves.extend(
+            self._d_corner_orientation_convert_v_to_sub_step_moves(d, 1,
+                                                                   self.get_down_corner_location(FaceID.R, FaceID.F),
+                                                                   FaceID.R))
+        self.cube.execute_moves(moves)
+        return True, moves
+
+    def _get_d_corner_orientation_value(self, corner_location: Location) -> int:
+        """
+        Returns the orientation value of a given corner. For details see:
+        "documentation/last_step_of_3x3_solution_idea/last_step_of_3x3_solution_idea.pdf".
+        :param corner_location: One of the locations of a corner of the D face.
+        :return: The orientation value of a given corner.
+        """
+        d_color = self.faces_colors[FaceID.D]
+
+        if self.cube.get_location_color(corner_location) is d_color:
+            d_color_face_id = corner_location.face_id
+
+        else:
+            first_loc, second_loc = self.cube.get_other_sticker_locations(corner_location)
+            if self.cube.get_location_color(first_loc) is d_color:
+                d_color_face_id = first_loc.face_id
+            elif self.cube.get_location_color(second_loc) is d_color:
+                d_color_face_id = second_loc.face_id
+            else:
+                raise ValueError(f"The given corner doesn't have any down-colored ({d_color.name}) location.")
+
+        if d_color_face_id is FaceID.D:
+            return 0
+        if d_color_face_id is FaceID.F or d_color_face_id is FaceID.B:
+            return 1
+        if d_color_face_id is FaceID.R or d_color_face_id is d_color_face_id.L:
+            return 2
+        raise ValueError(f"The given corner is not in the {FaceID.D.name} face.")
+
+    @staticmethod
+    def _d_corner_orientation_find_best_abgd(x: int, z: int, w: int) -> tuple[int, int, int, int]:
+        """
+        When a solution exists, finds the one with the most occurrences of 0. For details see:
+        "documentation/last_step_of_3x3_solution_idea/last_step_of_3x3_solution_idea.pdf".
+        :param x: The x value.
+        :param z: The z value.
+        :param w: The w value.
+        :return: The alpha, betta, gamma, delta values of the solution with the most occurrences of 0.
+        """
+        best_answer = []
+        num_of_zeroes_in_best = -1
+
+        for t in range(3):  # all options for t in Z3
+            answer = [-t - z, -t - w, t + z - x, t]
+            for i in range(len(answer)):
+                answer[i] %= 3
+
+            num_of_zeroes = answer.count(0)
+            if num_of_zeroes > num_of_zeroes_in_best:
+                best_answer = answer
+                num_of_zeroes_in_best = num_of_zeroes
+
+        return tuple(best_answer)
+
+    def _d_corner_orientation_convert_v_to_sub_step_moves(self, v: int, invert_on: int, d_location: Location,
+                                                          move_down_face_id: FaceID) -> list[Move]:
+        """
+        Converts a result variable to the specified sub-step moves. Does not apply any move. For more details about the
+        sub-steps see: "documentation/last_step_of_3x3_solution_idea/last_step_of_3x3_solution_idea.pdf".
+        :param v: A result variable.
+        :param invert_on: On which value of `v` we should invert the moves.
+        :param d_location: The D face corner location of the sub-step.
+        :param move_down_face_id: A location to specify which way to go down first in the sub-step if it would be run in
+            regular order. `move_down_face_id` Must be one of the other sides of `d_location`.
+        :return: A list containing the moves for the specified sub-step.
+        """
+        if v == 0:
+            return []
+
+        move_down_location, third_location = self.cube.get_other_sticker_locations(d_location)
+        if move_down_location.face_id is not move_down_face_id:
+            move_down_location, third_location = third_location, move_down_location
+
+        change_orientation_moves = self._change_d_corners_orientation(d_location, move_down_location, third_location)
+
+        if v == invert_on:
+            change_orientation_moves = Move.get_inverted_moves(change_orientation_moves)
+
+        return change_orientation_moves
