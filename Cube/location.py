@@ -1,4 +1,4 @@
-from face_id import FaceID
+from Cube.face_id import FaceID
 
 
 class Location:

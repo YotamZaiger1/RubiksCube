@@ -1,11 +1,5 @@
 from cube import Cube
 from solver_3x3 import Solver3x3
-from gui import GUI
-
-
-def main(*_):
-    gui = GUI(Cube(3))
-    gui.run()
 
 
 def average_moves_to_solve(run_times=100, shuffle_moves_number=100):
@@ -22,5 +16,4 @@ def average_moves_to_solve(run_times=100, shuffle_moves_number=100):
 
 
 if __name__ == '__main__':
-    main()
-    # print(average_moves_to_solve(1000, 1000))
+    print(average_moves_to_solve(1000, 1000))

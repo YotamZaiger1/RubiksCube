@@ -1,4 +1,4 @@
-from orientation import Orientation
+from Cube.orientation import Orientation
 
 
 class Move:

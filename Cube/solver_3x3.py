@@ -1,16 +1,16 @@
-from color import Color
-from cube import Cube
-from face_id import FaceID, RING_FACE_IDS
-from location import Location
-from move import Move
-from solver import Solver
+from Cube.color import Color
+from Cube.cube import Cube
+from Cube.face_id import FaceID, RING_FACE_IDS
+from Cube.location import Location
+from Cube.move import Move
+from Cube.solver import Solver
 
 
 class Solver3x3(Solver):
     def __init__(self, cube_3x3: Cube):
         super().__init__(cube_3x3)
         if cube_3x3.size != 3:
-            raise Exception(f"Given cube size is {cube_3x3.size} instead of 3.")
+            raise Exception(f"Given Cube size is {cube_3x3.size} instead of 3.")
 
         self.faces_colors: dict[FaceID: Color] = dict()
         for face_id in FaceID:
@@ -179,7 +179,7 @@ class Solver3x3(Solver):
     def _d_cross_action(self, down_location: Location, move_up_first_location: Location,
                         third_corner_location) -> list[Move]:
         """
-        Calculates the needed moves to change the D face cross. Does not apply the moves to the cube.
+        Calculates the needed moves to change the D face cross. Does not apply the moves to the Cube.
 
         :param down_location: The location of a corner sticker on the D face.
         :param move_up_first_location: A location to specify which way to go up first. Must be one of the other sides
@@ -198,7 +198,7 @@ class Solver3x3(Solver):
     def _d_edges_replacement(self, down_location: Location, move_down_location: Location,
                              third_corner_location) -> list[Move]:
         """
-        Calculates the needed moves to replace positions between 2 D edges. Does not apply the moves to the cube.
+        Calculates the needed moves to replace positions between 2 D edges. Does not apply the moves to the Cube.
 
         :param down_location: The location of a corner sticker on the D face.
         :param move_down_location: A location to specify which way to go down first. Must be one of the other sides
@@ -217,7 +217,7 @@ class Solver3x3(Solver):
     def _d_corner_replacement(self, down_location: Location, move_down_location: Location,
                               third_corner_location) -> list[Move]:
         """
-        Calculates the needed moves to replace positions between 3 D corners. Does not apply the moves to the cube.
+        Calculates the needed moves to replace positions between 3 D corners. Does not apply the moves to the Cube.
 
         :param down_location: The location of a corner sticker on the D face which doesn't change its location.
         :param move_down_location: A location to specify which way to go down. Must be one of the other sides of
@@ -240,7 +240,7 @@ class Solver3x3(Solver):
     def _change_d_corners_orientation(self, down_location: Location, move_down_location: Location,
                                       third_corner_location) -> list[Move]:
         """
-        Calculates the needed moves to change the orientation of 2 D corners. Does not apply the moves to the cube.
+        Calculates the needed moves to change the orientation of 2 D corners. Does not apply the moves to the Cube.
 
         :param down_location: The location of a corner sticker on the D face.
         :param move_down_location: A location to specify which way to go down first. Must be one of the other sides
@@ -647,7 +647,7 @@ class Solver3x3(Solver):
     def _get_d_corner_orientation_value(self, corner_location: Location) -> int:
         """
         Returns the orientation value of a given corner. For details see:
-        "documentation/last_step_of_3x3_solution_idea/last_step_of_3x3_solution_idea.pdf".
+        "Documentation/last_step_of_3x3_solution_idea/last_step_of_3x3_solution_idea.pdf".
         :param corner_location: One of the locations of a corner of the D face.
         :return: The orientation value of a given corner.
         """
@@ -677,7 +677,7 @@ class Solver3x3(Solver):
     def _d_corner_orientation_find_best_abgd(x: int, z: int, w: int) -> tuple[int, int, int, int]:
         """
         When a solution exists, finds the one with the most occurrences of 0. For details see:
-        "documentation/last_step_of_3x3_solution_idea/last_step_of_3x3_solution_idea.pdf".
+        "Documentation/last_step_of_3x3_solution_idea/last_step_of_3x3_solution_idea.pdf".
         :param x: The x value.
         :param z: The z value.
         :param w: The w value.
@@ -702,7 +702,7 @@ class Solver3x3(Solver):
                                                           move_down_face_id: FaceID) -> list[Move]:
         """
         Converts a result variable to the specified sub-step moves. Does not apply any move. For more details about the
-        sub-steps see: "documentation/last_step_of_3x3_solution_idea/last_step_of_3x3_solution_idea.pdf".
+        sub-steps see: "Documentation/last_step_of_3x3_solution_idea/last_step_of_3x3_solution_idea.pdf".
         :param v: A result variable.
         :param invert_on: On which value of `v` we should invert the moves.
         :param d_location: The D face corner location of the sub-step.

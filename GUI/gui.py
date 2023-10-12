@@ -2,13 +2,13 @@ from typing import Union
 
 import pygame as pg
 
-from color import Color
-from cube import Cube
-from face_id import FaceID
-from move import Move
-from orientation import Orientation
-from solver import Solver
-from solver_3x3 import Solver3x3
+from Cube.color import Color
+from Cube.cube import Cube
+from Cube.face_id import FaceID
+from Cube.move import Move
+from Cube.orientation import Orientation
+from Cube.solver import Solver
+from Cube.solver_3x3 import Solver3x3
 
 BACKGROUND_COLOR = (5, 5, 5, 255)
 NO_COLOR = (0, 0, 0, 0)

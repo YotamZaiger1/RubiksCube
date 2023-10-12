@@ -1,4 +1,4 @@
-from cube import Cube
+from Cube.cube import Cube
 
 
 class Solver:

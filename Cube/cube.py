@@ -1,11 +1,11 @@
 import random
 
-from color import Color
-from face import Face
-from face_id import FaceID, LEFT, UP, RIGHT, DOWN
-from location import Location
-from move import Move
-from orientation import Orientation
+from Cube.color import Color
+from Cube.face import Face
+from Cube.face_id import FaceID, LEFT, UP, RIGHT, DOWN
+from Cube.location import Location
+from Cube.move import Move
+from Cube.orientation import Orientation
 
 ORDERED_COLORS = {FaceID.U: Color.Wh, FaceID.F: Color.Bl, FaceID.R: Color.Or, FaceID.B: Color.Gr,
                   FaceID.L: Color.Re, FaceID.D: Color.Ye}
@@ -73,7 +73,7 @@ class Cube:
     def trace_a_moved_sticker(self, original_location: Location, move: Move) -> Location:
         """
         Returns where `original_location` will be after the move `move` would be applied (Not applies `move` on the
-        cube). `original_location` must be a location that moves to a new face after the move `move` would be applied.
+        Cube). `original_location` must be a location that moves to a new face after the move `move` would be applied.
         Otherwise, a `ValueError` would be raised.
         :param original_location: The location to trace.
         :param move: The move to trace the location with.
@@ -164,7 +164,7 @@ class Cube:
                                       goal_face_id: FaceID) -> tuple[list[Move], Location]:
         """
         Calculate the fewest required moves to rotate `face_id_to_rotate` till `location_to_trace` will be in
-        `goal_face_id`. Does not apply any move to `self.cube`.
+        `goal_face_id`. Does not apply any move to `self.Cube`.
         :param face_id_to_rotate: The face that being rotated.
         :param location_to_trace: The location to trace.
         :param goal_face_id: The goal face id for `location_to_trace`

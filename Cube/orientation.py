@@ -1,6 +1,6 @@
 from enum import Enum, unique, auto
 
-from face_id import FaceID
+from Cube.face_id import FaceID
 
 X_ROTATION_FACES: list[FaceID] = [FaceID.F, FaceID.R, FaceID.B, FaceID.L]
 Y_ROTATION_FACES: list[FaceID] = [FaceID.F, FaceID.U, FaceID.B, FaceID.D]

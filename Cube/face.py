@@ -1,7 +1,7 @@
-from color import Color
-from face_id import FaceID
-from index_translator import IndexTranslator, TOP_DOWN, BOTTOM_UP, LEFT_RIGHT, RIGHT_LEFT
-from orientation import Orientation
+from Cube.color import Color
+from Cube.face_id import FaceID
+from Cube.index_translator import IndexTranslator, TOP_DOWN, BOTTOM_UP, LEFT_RIGHT, RIGHT_LEFT
+from Cube.orientation import Orientation
 
 
 class Face:
@@ -17,7 +17,7 @@ class Face:
         `self.stickers`.
 
         See:
-            documentation/xyz orientation.png
+            Documentation/xyz orientation.png
 
         :param orientation: Which strip orientation to return (specified in the documentation).
         :param index: The index of the strip in the face (specified in the documentation).
