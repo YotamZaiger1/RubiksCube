@@ -568,6 +568,8 @@ class Solver3x3(Solver):
             moves.extend(corner_replacement_moves)
             self.cube.execute_moves(corner_replacement_moves)
             fitting_locations, unfitting_locations = self._d_corner_positions_find_locations()
+            if len(fitting_locations) == 0 or len(fitting_locations) == 2:  # in a solvable cube this should change to 1
+                return False, moves
 
         if len(fitting_locations) == 1:
             d_location = fitting_locations[0]
