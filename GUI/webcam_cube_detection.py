@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-
 from Cube.color import Color
 
 
@@ -74,69 +73,191 @@ class WebcamCube:
 
         return start_x, start_y, center_x, center_y, sticker_side_length, face_side_length, width, height
 
-    def detect_stickers(self, frame, center_x_percentage: float, center_y_percentage: float,
-                        face_side_length_percentage: float):
+    @staticmethod
+    def detect_sticker_contours(frame):
+        # todo: change hard-codded numbers
+        filtered_frames = WebcamCube.get_all_filtered_frames(frame)
+        stickers_contours_by_layer: list[list] = [[] for _ in range(len(filtered_frames))]
 
+        for i, filtered_frame in enumerate(filtered_frames):
+            contours, hierarchy = cv2.findContours(filtered_frame, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
+
+            for contour in contours:
+                area = cv2.contourArea(contour)
+
+                if area > 700:
+                    perimeter = cv2.arcLength(contour, True)
+
+                    side_length = perimeter * 0.25  # squares are expected
+                    area_diff = side_length * side_length - area
+                    if area_diff < 150:
+                        stickers_contours_by_layer[i].append(contour)
+
+        return stickers_contours_by_layer
+
+    @staticmethod
+    def draw_contours(frame, contours_by_layer, color):
+        for layer in contours_by_layer:
+            cv2.drawContours(frame, layer, -1, color, 2)
+
+    @staticmethod
+    def morph_open_close(frame, kernel=None):
+        if kernel is None:
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+
+        frame = cv2.morphologyEx(frame, cv2.MORPH_OPEN, kernel)
+        frame = cv2.morphologyEx(frame, cv2.MORPH_CLOSE, kernel)
+        return frame
+
+    @staticmethod
+    def hsv_threshold_filter(frame):
         image_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)  # better performance using HSV values as BGR values
         gray_frame = cv2.cvtColor(image_hsv, cv2.COLOR_BGR2GRAY)
 
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
-        gray_frame = cv2.morphologyEx(gray_frame, cv2.MORPH_OPEN, kernel)
-        gray_frame = cv2.morphologyEx(gray_frame, cv2.MORPH_CLOSE, kernel)
+        gray_frame = WebcamCube.morph_open_close(gray_frame)
 
         gray_frame = cv2.adaptiveThreshold(gray_frame, 20, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 99,
                                            0)
-        contours, hierarchy = cv2.findContours(gray_frame, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
+        return gray_frame
 
-        colors = []
-        relevant_contours = []
-        for contour in contours:
-            area = cv2.contourArea(contour)
+    @staticmethod
+    def sharpen_filter(frame):
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        blur = cv2.medianBlur(gray, 5)
+        sharpen_kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
+        sharpen = cv2.filter2D(blur, -1, sharpen_kernel)
 
-            if area > 700:
-                perimeter = cv2.arcLength(contour, True)
-                approximated_polygon = cv2.approxPolyDP(contour, perimeter * 0.01, True)
-                # hull = cv2.convexHull(contour)
+        morphed = WebcamCube.morph_open_close(sharpen)
 
-                side_length = perimeter / 4  # squares are expected
-                area_diff = side_length ** 2 - area
-                if area_diff < 150:
-                    x, y, width, height = cv2.boundingRect(contour)
+        thresh = cv2.adaptiveThreshold(morphed, 20, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15,
+                                       0)
+        return thresh
 
-                    color = np.array(cv2.mean(frame[y:y + height, x:x + width])).astype(float)
-                    relevant_contours.append(contour)
-                    colors.append(WebcamCube.classify_color(color, self.settings.stickers_bgr_values))
-                    cv2.drawContours(frame, [contour], 0, (255, 255, 0), 2)
-                    cv2.drawContours(frame, [approximated_polygon], 0, (255, 255, 0), 2)
+    @staticmethod
+    def gaussian_blur_filter(frame):
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        blur = cv2.GaussianBlur(gray, (9, 9), 0)
+        thresh = cv2.adaptiveThreshold(blur, 255, 1, 1, 11, 2)
 
-        # relevant_contours = self.select_relevant_contours(relevant_contours)
+        return thresh
 
-        return colors
+    @staticmethod
+    def get_all_filtered_frames(frame):
+        return [WebcamCube.hsv_threshold_filter(frame), WebcamCube.sharpen_filter(frame),
+                WebcamCube.gaussian_blur_filter(frame)]
 
-    def select_relevant_contours(self, contours):
-        cx_values, cy_values, w_values, h_values = [], [], [], []  # center locations and sizes
-        for contour in contours:
-            x, y, width, height = cv2.boundingRect(contour)
-            cx_values.append(x + width / 2)
-            cy_values.append(y + height / 2)
-            w_values.append(width)
-            h_values.append(height)
+    def select_relevant_contours(self, contours_by_layer):
+        # combine overlap contours.
+        # find 3d-orientation of the face (using close to quadrilateral contours only).
+        # deduce face size if it had been placed parallel to the camera view plane.
+        # discard contours with unfitting 3d-orientation.
+        # sort remaining contours by position in the 2 axis of the face in 3d.
 
-        average_side_length = (sum(w_values) + sum(h_values)) / (2 * len(contours))
-        average_cx = sum(cx_values) / len(contours)
-        average_cy = sum(cy_values) / len(contours)
+        # go over face-sized slices (don't forget to change size as you get further away from the camera) and select the
+        # one contains most contours.
 
-        relevant_contours = []
-        for cx, cy, w, h in zip(cx_values, cy_values, w_values, h_values):
-            dx = average_cx - cx
-            dy = average_cy - cy
+        # discard other contours.
+        ################################################################################################################
 
-            accepted_distance = self.cube_size * average_side_length
-            if abs(dx) > accepted_distance or abs(dy) > accepted_distance:
-                continue
+        s = 0
+        calculated_number = 0
+        for layer in contours_by_layer:
+            for contour in layer:
+                rect = cv2.minAreaRect(contour)
+                angle = rect[2]
+                # if angle - s > 45:
+                #     angle = angle - 90
+                if angle > 45:
+                    angle -= 90
+                s += angle
+            calculated_number += len(layer)
 
+        if calculated_number == 0:
+            return 0
+        average_angle = s / calculated_number
+        print(average_angle)
+        return average_angle
 
-        return contours
+        # if len(contours) == 0:
+        #     return contours
+        #
+        # cx_values, cy_values, w_values, h_values = [], [], [], []  # center locations and sizes
+        # for contour in contours:
+        #     x, y, width, height = cv2.boundingRect(contour)
+        #     cx_values.append(x + width / 2)
+        #     cy_values.append(y + height / 2)
+        #     w_values.append(width)
+        #     h_values.append(height)
+        #
+        # average_side_length = (sum(w_values) + sum(h_values)) / (2 * len(contours))
+        # average_cx = sum(cx_values) / len(contours)
+        # average_cy = sum(cy_values) / len(contours)
+        #
+        # relevant_contours = []
+        # for cx, cy, w, h in zip(cx_values, cy_values, w_values, h_values):
+        #     dx = average_cx - cx
+        #     dy = average_cy - cy
+        #
+        #     accepted_distance = self.cube_size * average_side_length / 2
+        #     if abs(dx) > accepted_distance or abs(dy) > accepted_distance:
+        #         continue
+        # print(f"{average_side_length = }")
+        #
+        # return contours
+
+    def estimate_sticker_location(self, rectangles: list, face_a_value, face_b_value, sticker_side_length):
+        (pivot_x, pivot_y), (_, _), _ = np.random.choice(rectangles)
+
+        # horizontal and vertical face lines (ax + by + c = 0)
+        ah, bh, ch = -face_a_value, face_b_value, -(pivot_x * face_a_value + pivot_y * face_b_value)
+        av, bv, cv = -face_b_value, face_a_value, -(pivot_x * face_b_value + pivot_y * face_a_value)
+
+        dxs: list[int] = []
+        dys: list[int] = []
+        sticker_side_length_squared = sticker_side_length * sticker_side_length
+        for rectangle in rectangles:
+            (center_x, center_y), (_, _), _ = rectangle
+
+            # distance from the horizontal and vertical face lines:
+            rotated_x_squared = WebcamCube._dist_from_point_to_line_squared(center_x, center_y, ah, bh, ch)
+            rotated_y_squared = WebcamCube._dist_from_point_to_line_squared(center_x, center_y, av, bv, cv)
+
+            dxs.append((rotated_x_squared - pivot_x) // sticker_side_length_squared)
+            dys.append((rotated_y_squared - pivot_y) // sticker_side_length_squared)
+
+        sticker_locations = []
+
+    @staticmethod
+    def _dist_from_point_to_line_squared(x, y, a, b, c):
+        numerator = a * x + b * y + c
+        return numerator * numerator / (a * a + b * b)
+
+    @staticmethod
+    def _find_best_beginning(numbers, window_size):
+        best_beginning = None
+        best_beginning_occurrences = -1
+
+        unique, counts = np.unique(numbers, return_counts=True)
+        last_sum = 0
+        last_j = 0
+        for i, n in enumerate(unique):
+            found = last_sum
+
+            j = last_j
+            while j < len(unique) and unique[j] - n < window_size:
+                found += counts[j]
+                j += 1
+
+            if found > best_beginning_occurrences:
+                best_beginning_occurrences = found
+                best_beginning = n
+
+            last_sum = found - counts[i]
+            last_j = j
+
+        return best_beginning
+
+    ####################################################################################################################
 
     @staticmethod
     def draw_grid(frame, grid_size, center_x_percentage: float, center_y_percentage: float,
@@ -150,32 +271,37 @@ class WebcamCube:
             latitude = start_y + i * sticker_side_length
             longitude = start_x + i * sticker_side_length
 
-            horizontal_start = WebcamCube.int_list([start_x, latitude])
-            horizontal_end = WebcamCube.int_list([start_x + face_side_length, latitude])
-            vertical_start = WebcamCube.int_list([longitude, start_y])
-            vertical_end = WebcamCube.int_list([longitude, start_y + face_side_length])
+            horizontal_start = np.int_([start_x, latitude])
+            horizontal_end = np.int_([start_x + face_side_length, latitude])
+            vertical_start = np.int_([longitude, start_y])
+            vertical_end = np.int_([longitude, start_y + face_side_length])
 
             cv2.line(frame, horizontal_start, horizontal_end, color, thickness)
             cv2.line(frame, vertical_start, vertical_end, color, thickness)
-
-    @staticmethod
-    def int_list(lst: list) -> list[int]:
-        return [int(x) for x in lst]
 
     def detect_face_from_video(self, capture):
         while True:
             frame = WebcamCube.read_capture(capture)
 
-            detected_stickers = self.detect_stickers(frame, *self.settings.detection_grid_position)
-            print(detected_stickers)
+            sticker_contours_by_layer = WebcamCube.detect_sticker_contours(frame)
+            angle = self.select_relevant_contours(sticker_contours_by_layer)
+            x = int(1000 * np.cos(angle * np.pi / 180))
+            y = int(1000 * np.sin(angle * np.pi / 180))
+            cv2.line(frame, (-x, -y), (x, y), (0, 0, 255), 2)
+            x = int(-1000 * np.sin(angle * np.pi / 180))
+            y = int(1000 * np.cos(angle * np.pi / 180))
+            cv2.line(frame, (frame.shape[0] - x, -y), (x + frame.shape[0], y), (0, 0, 255), 2)
 
-            # WebcamCube.draw_grid(frame, self.cube_size, *self.settings.detection_grid_position,
-            #                      *self.settings.detection_grid_drawing)
+            WebcamCube.draw_contours(frame, sticker_contours_by_layer, (255, 255, 0))
+            # print(detected_stickers)
+
             cv2.imshow(self.settings.window_name, frame)
+
             if self.should_close_window(self.settings.window_name):
                 break
 
     def calibrate_colors(self, capture):
+        # todo: replace with kmeans classification
         last_color = None
         while True:
             frame = WebcamCube.read_capture(capture)
@@ -240,3 +366,6 @@ if __name__ == '__main__':
     }
     webcamCube = WebcamCube(5, webcamCubeSettings)
     webcamCube.video_cube()
+
+# todo: check for static method calls which still use self.
+#       remove print statements
