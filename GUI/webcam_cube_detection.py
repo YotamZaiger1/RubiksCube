@@ -146,6 +146,8 @@ class WebcamCube:
         return [WebcamCube.hsv_threshold_filter(frame), WebcamCube.sharpen_filter(frame),
                 WebcamCube.gaussian_blur_filter(frame)]
 
+    ####################################################################################################################
+
     def select_relevant_contours(self, contours_by_layer):
         # combine overlap contours.
         # find 3d-orientation of the face (using close to quadrilateral contours only).
@@ -175,7 +177,6 @@ class WebcamCube:
         if calculated_number == 0:
             return 0
         average_angle = s / calculated_number
-        print(average_angle)
         return average_angle
 
         # if len(contours) == 0:
@@ -205,32 +206,80 @@ class WebcamCube:
         #
         # return contours
 
-    def estimate_sticker_location(self, rectangles: list, face_a_value, face_b_value, sticker_side_length):
-        (pivot_x, pivot_y), (_, _), _ = np.random.choice(rectangles)
+    @staticmethod
+    def get_rectangles(contours):
+        rectangles = []
+        for contour in contours:
+            rectangles.append(cv2.minAreaRect(contour))
+        return rectangles
 
-        # horizontal and vertical face lines (ax + by + c = 0)
-        ah, bh, ch = -face_a_value, face_b_value, -(pivot_x * face_a_value + pivot_y * face_b_value)
-        av, bv, cv = -face_b_value, face_a_value, -(pivot_x * face_b_value + pivot_y * face_a_value)
+    @staticmethod
+    def estimate_sticker_side_length(contours):
+        total_side_lengths = 0
+        for contour in contours:
+            perimeter = cv2.arcLength(contour, True)
+            total_side_lengths += perimeter * 0.25
+        return total_side_lengths / len(contours)
 
-        dxs: list[int] = []
-        dys: list[int] = []
-        sticker_side_length_squared = sticker_side_length * sticker_side_length
+    @staticmethod
+    def estimate_face_slope(rectangles) -> tuple[float, float]:
+        total_angle = 0
         for rectangle in rectangles:
+            angle = rectangle[2]
+            if angle > 45:  # to avoid different sides angle selection
+                angle -= 90
+            total_angle += angle
+
+        average_angle = total_angle / len(rectangles)
+        # find a and b values of the slope (ax + by = 0)
+        if average_angle != 90:
+            a, b = -np.tan(np.radians(average_angle)), 1
+        else:
+            a, b = 1, 0
+
+        return a, b
+
+    @staticmethod
+    def estimate_sticker_locations(rectangles: list, face_a_value, face_b_value, sticker_side_length, frame=None):
+        (pivot_x, pivot_y), (_, _), _ = rectangles[0]
+        if frame is not None:  # todo: delete
+            box = cv2.boxPoints(rectangles[0])
+            box = np.int_(box)
+            cv2.drawContours(frame, [box], 0, (0, 0, 255), 8)
+
+        # horizontal and vertical face lines (ax + by + c = 0) whose origin is (pivot_x, pivot_y)
+        # notice the minor differences
+        ah, bh, ch = face_a_value, +face_b_value, -pivot_y * face_b_value - pivot_x * face_a_value
+        av, bv, cv = face_b_value, -face_a_value, +pivot_y * face_a_value - pivot_x * face_b_value
+
+        positions = []
+        for i, rectangle in enumerate(rectangles):
             (center_x, center_y), (_, _), _ = rectangle
 
             # distance from the horizontal and vertical face lines:
-            rotated_x_squared = WebcamCube._dist_from_point_to_line_squared(center_x, center_y, ah, bh, ch)
-            rotated_y_squared = WebcamCube._dist_from_point_to_line_squared(center_x, center_y, av, bv, cv)
+            rotated_x = WebcamCube._signed_dist_from_point_to_line(center_x, center_y, av, bv, cv)
+            rotated_y = WebcamCube._signed_dist_from_point_to_line(center_x, center_y, ah, bh, ch)
 
-            dxs.append((rotated_x_squared - pivot_x) // sticker_side_length_squared)
-            dys.append((rotated_y_squared - pivot_y) // sticker_side_length_squared)
+            # using int() instead of floordiv to cast any numpy object to a normal integer
+            row = int(rotated_y / sticker_side_length)
+            col = int(rotated_x / sticker_side_length)
 
-        sticker_locations = []
+            positions.append([i, row, col])
+
+        positions.sort(key=lambda v: v[2])  # sort by col values
+        min_col = positions[0][2]
+        positions.sort(key=lambda v: v[1])  # sort by row values
+        min_row = positions[0][1]
+
+        sticker_locations = [None] * len(rectangles)
+        for i, row, col in positions:
+            sticker_locations[i] = [row - min_row, col - min_col]
+
+        return sticker_locations
 
     @staticmethod
-    def _dist_from_point_to_line_squared(x, y, a, b, c):
-        numerator = a * x + b * y + c
-        return numerator * numerator / (a * a + b * b)
+    def _signed_dist_from_point_to_line(x, y, a, b, c):
+        return (a * x + b * y + c) / (a * a + b * b) ** 0.5
 
     @staticmethod
     def _find_best_beginning(numbers, window_size):
@@ -282,23 +331,73 @@ class WebcamCube:
     def detect_face_from_video(self, capture):
         while True:
             frame = WebcamCube.read_capture(capture)
+            height, width = frame.shape[:2]
 
             sticker_contours_by_layer = WebcamCube.detect_sticker_contours(frame)
-            angle = self.select_relevant_contours(sticker_contours_by_layer)
-            x = int(1000 * np.cos(angle * np.pi / 180))
-            y = int(1000 * np.sin(angle * np.pi / 180))
-            cv2.line(frame, (-x, -y), (x, y), (0, 0, 255), 2)
-            x = int(-1000 * np.sin(angle * np.pi / 180))
-            y = int(1000 * np.cos(angle * np.pi / 180))
-            cv2.line(frame, (frame.shape[0] - x, -y), (x + frame.shape[0], y), (0, 0, 255), 2)
 
-            WebcamCube.draw_contours(frame, sticker_contours_by_layer, (255, 255, 0))
-            # print(detected_stickers)
+            detected_face_colors = [[None for _ in range(self.cube_size)] for _ in range(self.cube_size)]
+
+            contours = []
+            for layer in sticker_contours_by_layer:
+                contours.extend(layer)
+            if len(contours) > 0:
+                rectangles = WebcamCube.get_rectangles(contours)
+                sticker_side_length = WebcamCube.estimate_sticker_side_length(contours)
+                face_a_value, face_b_value = WebcamCube.estimate_face_slope(rectangles)
+                estimated_sticker_locations = WebcamCube.estimate_sticker_locations(rectangles, face_a_value,
+                                                                                    face_b_value, sticker_side_length,
+                                                                                    frame=frame)
+                for i, (row, col) in enumerate(estimated_sticker_locations):
+                    mask = np.zeros((height, width), np.uint8)
+                    cv2.drawContours(mask, contours, i, (255, 255, 255), 1)
+                    found_color = cv2.mean(frame, mask=mask)
+                    color = WebcamCube.classify_color(found_color, self.settings.stickers_bgr_values)
+                    if row < self.cube_size and col < self.cube_size:
+                        detected_face_colors[row][col] = color
+                        pass
+                    else:
+                        print(f"{row= }, {col= }")
+                        pass
+
+            frame = cv2.drawContours(frame, contours, -1, (255, 255, 0), 2)
+
+            ###########################################################
+            # angle = self.select_relevant_contours(sticker_contours_by_layer)
+            # x = int(1000 * np.cos(angle * np.pi / 180))
+            # y = int(1000 * np.sin(angle * np.pi / 180))
+            # cv2.line(frame, (-x, -y), (x, y), (0, 0, 255), 2)
+            # x = int(-1000 * np.sin(angle * np.pi / 180))
+            # y = int(1000 * np.cos(angle * np.pi / 180))
+            # cv2.line(frame, (width - x, -y), (x + width, y), (0, 0, 255), 2)
+
+            # WebcamCube.draw_contours(frame, sticker_contours_by_layer, (255, 255, 0))
+            ###########################################################
+
+            detected_face_bgr_frame = np.zeros((height, width, 3), np.uint8)
+            self.draw_face(detected_face_bgr_frame, detected_face_colors)
+            cv2.imshow("Detected Face", detected_face_bgr_frame)
 
             cv2.imshow(self.settings.window_name, frame)
 
             if self.should_close_window(self.settings.window_name):
                 break
+
+    def draw_face(self, frame, colors):
+        frame[:, :] = (20, 20, 20)  # background  todo: make an option in self.settings
+
+        start_x, start_y, _, _, sticker_side_length, face_side_length, _, _ = (
+            WebcamCube._get_positions_and_sizes(frame, self.cube_size, *self.settings.detection_grid_position))
+
+        for i, row in enumerate(colors):
+            for j, color in enumerate(row):
+                if color is not None:
+                    up, left = start_y + i * sticker_side_length, start_x + j * sticker_side_length
+                    down, right = up + sticker_side_length, left + sticker_side_length
+                    up, down, left, right = np.int_([up, down, left, right])
+                    frame[up:down, left:right] = self.settings.stickers_bgr_values[color]
+
+        WebcamCube.draw_grid(frame, self.cube_size, *self.settings.detection_grid_position,
+                             *self.settings.detection_grid_drawing)
 
     def calibrate_colors(self, capture):
         # todo: replace with kmeans classification
@@ -369,3 +468,5 @@ if __name__ == '__main__':
 
 # todo: check for static method calls which still use self.
 #       remove print statements
+#       delete unused methods
+#       use cv2.rotatedRectangleIntersection() for overlapping contours detection
