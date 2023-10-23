@@ -1,5 +1,9 @@
+import sys
+from queue import Queue
+
 import cv2
 import numpy as np
+
 from Cube.color import Color
 
 
@@ -43,8 +47,8 @@ class WebcamCube:
             Exception(err_msg)
         return frame
 
-    def should_close_window(self, window_name) -> bool:
-        pressed_key = cv2.waitKey(1) & 0xFF
+    def should_close_window(self, window_name, wait_key_delay=1) -> bool:
+        pressed_key = cv2.waitKey(wait_key_delay) & 0xFF
         is_closed = cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1
         return is_closed or pressed_key in self.settings.quit_keys
 
@@ -73,6 +77,7 @@ class WebcamCube:
 
         return start_x, start_y, center_x, center_y, sticker_side_length, face_side_length, width, height
 
+    ####################################################################################################################
     @staticmethod
     def detect_sticker_contours(frame):
         # todo: change hard-codded numbers
@@ -148,70 +153,20 @@ class WebcamCube:
 
     ####################################################################################################################
 
-    def select_relevant_contours(self, contours_by_layer):
-        # combine overlap contours.
-        # find 3d-orientation of the face (using close to quadrilateral contours only).
-        # deduce face size if it had been placed parallel to the camera view plane.
-        # discard contours with unfitting 3d-orientation.
-        # sort remaining contours by position in the 2 axis of the face in 3d.
-
-        # go over face-sized slices (don't forget to change size as you get further away from the camera) and select the
-        # one contains most contours.
-
-        # discard other contours.
-        ################################################################################################################
-
-        s = 0
-        calculated_number = 0
-        for layer in contours_by_layer:
-            for contour in layer:
-                rect = cv2.minAreaRect(contour)
-                angle = rect[2]
-                # if angle - s > 45:
-                #     angle = angle - 90
-                if angle > 45:
-                    angle -= 90
-                s += angle
-            calculated_number += len(layer)
-
-        if calculated_number == 0:
-            return 0
-        average_angle = s / calculated_number
-        return average_angle
-
-        # if len(contours) == 0:
-        #     return contours
-        #
-        # cx_values, cy_values, w_values, h_values = [], [], [], []  # center locations and sizes
-        # for contour in contours:
-        #     x, y, width, height = cv2.boundingRect(contour)
-        #     cx_values.append(x + width / 2)
-        #     cy_values.append(y + height / 2)
-        #     w_values.append(width)
-        #     h_values.append(height)
-        #
-        # average_side_length = (sum(w_values) + sum(h_values)) / (2 * len(contours))
-        # average_cx = sum(cx_values) / len(contours)
-        # average_cy = sum(cy_values) / len(contours)
-        #
-        # relevant_contours = []
-        # for cx, cy, w, h in zip(cx_values, cy_values, w_values, h_values):
-        #     dx = average_cx - cx
-        #     dy = average_cy - cy
-        #
-        #     accepted_distance = self.cube_size * average_side_length / 2
-        #     if abs(dx) > accepted_distance or abs(dy) > accepted_distance:
-        #         continue
-        # print(f"{average_side_length = }")
-        #
-        # return contours
-
     @staticmethod
     def get_rectangles(contours):
         rectangles = []
         for contour in contours:
             rectangles.append(cv2.minAreaRect(contour))
         return rectangles
+
+    @staticmethod
+    def get_center_points(rectangles):
+        center_points = []
+        for rectangle in rectangles:
+            (center_x, center_y), (_, _), _ = rectangle
+            center_points.append((center_x, center_y))
+        return center_points
 
     @staticmethod
     def estimate_sticker_side_length(contours):
@@ -226,7 +181,8 @@ class WebcamCube:
         total_angle = 0
         for rectangle in rectangles:
             angle = rectangle[2]
-            if angle > 45:  # to avoid different sides angle selection
+            # avoid different sides angle selection problem when the cube is being held near 0 degrees
+            if angle > 45:
                 angle -= 90
             total_angle += angle
 
@@ -240,71 +196,219 @@ class WebcamCube:
         return a, b
 
     @staticmethod
-    def estimate_sticker_locations(rectangles: list, face_a_value, face_b_value, sticker_side_length, frame=None):
-        (pivot_x, pivot_y), (_, _), _ = rectangles[0]
-        if frame is not None:  # todo: delete
-            box = cv2.boxPoints(rectangles[0])
-            box = np.int_(box)
-            cv2.drawContours(frame, [box], 0, (0, 0, 255), 8)
+    def combine_overlap_rectangles(rectangles, combine_overlap_percentage: float) -> None:
+        """
+        Combines rectangles which overlap. The method is in-place.
+        :param rectangles: List of rectangles to combine. The original list values may be changed.
+        :param combine_overlap_percentage: A value between 0 and 1. Combine two rectangles iff there intersection covers
+            at least `combine_overlap_percentage`*(`the area of the smaller rectangle`).
+        """
+        i = 0
+        while i < len(rectangles):
+            rect_1 = rectangles[i]
+            (center_x1, center_y1), (width_1, height_1), angle_1 = rect_1
+            area_1 = width_1 * height_1
 
-        # horizontal and vertical face lines (ax + by + c = 0) whose origin is (pivot_x, pivot_y)
-        # notice the minor differences
-        ah, bh, ch = face_a_value, +face_b_value, -pivot_y * face_b_value - pivot_x * face_a_value
-        av, bv, cv = face_b_value, -face_a_value, +pivot_y * face_a_value - pivot_x * face_b_value
+            j = i + 1
+            while j < len(rectangles):
+                rect_2 = rectangles[j]
+                intersection_type, intersection_points = cv2.rotatedRectangleIntersection(rect_1, rect_2)
+                combined = False
 
-        positions = []
-        for i, rectangle in enumerate(rectangles):
-            (center_x, center_y), (_, _), _ = rectangle
+                # check only when the intersection has area
+                if intersection_type != cv2.INTERSECT_NONE and len(intersection_points) > 2:
+                    order_points = cv2.convexHull(intersection_points, returnPoints=True)
+                    intersection_area = cv2.contourArea(order_points)
 
-            # distance from the horizontal and vertical face lines:
-            rotated_x = WebcamCube._signed_dist_from_point_to_line(center_x, center_y, av, bv, cv)
-            rotated_y = WebcamCube._signed_dist_from_point_to_line(center_x, center_y, ah, bh, ch)
+                    (center_x2, center_y2), (width_2, height_2), angle_2 = rect_2
+                    area_2 = width_2 * height_2
+                    if intersection_area > combine_overlap_percentage * min(area_1, area_2):
+                        rect_1_factor, rect_2_factor = area_1 / (area_1 + area_2), area_2 / (area_1 + area_2)
 
-            # using int() instead of floordiv to cast any numpy object to a normal integer
-            row = int(rotated_y / sticker_side_length)
-            col = int(rotated_x / sticker_side_length)
+                        combined_center_x = center_x1 * rect_1_factor + center_x2 * rect_2_factor
+                        combined_center_y = center_y1 * rect_1_factor + center_y2 * rect_2_factor
+                        combined_width = width_1 * rect_1_factor + width_2 * rect_2_factor
+                        combined_height = height_1 * rect_1_factor + height_2 * rect_2_factor
+                        combined_angle = angle_1 if angle_1 > angle_2 else angle_2
+                        combined_rect = ((combined_center_x, combined_center_y), (combined_width, combined_height),
+                                         combined_angle)
 
-            positions.append([i, row, col])
+                        rectangles[i] = combined_rect
+                        rectangles.pop(j)
+                        combined = True
 
-        positions.sort(key=lambda v: v[2])  # sort by col values
-        min_col = positions[0][2]
-        positions.sort(key=lambda v: v[1])  # sort by row values
-        min_row = positions[0][1]
+                if not combined:
+                    j += 1
+            i += 1
 
-        sticker_locations = [None] * len(rectangles)
-        for i, row, col in positions:
-            sticker_locations[i] = [row - min_row, col - min_col]
-
-        return sticker_locations
+        return None
 
     @staticmethod
-    def _signed_dist_from_point_to_line(x, y, a, b, c):
+    def translate_points_to_new_axes(points, pivot: tuple[float, float], horizontal_a, horizontal_b) -> (
+            list)[list[float]]:
+        """
+        Translates the coordinates of a (x, y) points list into a new axes system whose origin is at `pivot` and its
+        horizontal axes is parallel to the line `a * x + b * y = 0`.
+        :param points: List of (x, y) coordinates to translate.
+        :param pivot: The (x, y) values of the new axes system origin.
+        :param horizontal_a: The `a` value of the horizontal axes. `a * x + b * y + c = 0`
+        :param horizontal_b: The `b` value of the horizontal axes. `a * x + b * y + c = 0`
+        :return: A new list contains the translated (x, y) coordinates.
+        """
+        pivot_x, pivot_y = pivot
+
+        # horizontal and vertical axes lines (ax + by + c = 0) whose origin is (pivot_x, pivot_y)
+        # notice the minor differences
+        ah, bh, ch = horizontal_a, +horizontal_b, -pivot_y * horizontal_b - pivot_x * horizontal_a
+        av, bv, cv = horizontal_b, -horizontal_a, +pivot_y * horizontal_a - pivot_x * horizontal_b
+
+        positions = []
+        for point in points:
+            x, y = point
+
+            # distance from the horizontal and vertical axes:
+            rotated_x = WebcamCube.signed_dist_from_point_to_line(x, y, av, bv, cv)
+            rotated_y = WebcamCube.signed_dist_from_point_to_line(x, y, ah, bh, ch)
+            positions.append([rotated_x, rotated_y])
+
+        return positions
+
+    @staticmethod
+    def signed_dist_from_point_to_line(x, y, a, b, c):
+        """
+        Calculates the signed distance between the point (`x`, `y`) and the line `a` * x + `b` * y + `c` = 0. The
+        returned value is not always positive. Use `abs()` on the returned value to get normal unsigned distance.
+        Notice: Inverting the sign of `a`, `b` and `c` will invert the sign of the returned value but won't affect its
+        absolute value.
+        :param x: The point x value.
+        :param y: The point y value.
+        :param a: The line a value.
+        :param b: The line b value.
+        :param c: The line c value.
+        :return: The signed distance between the point (`x`, `y`) and the line `a` * x + `b` * y + `c` = 0.
+        """
         return (a * x + b * y + c) / (a * a + b * b) ** 0.5
 
     @staticmethod
-    def _find_best_beginning(numbers, window_size):
-        best_beginning = None
-        best_beginning_occurrences = -1
+    def normalize_points(points, scale_by: float) -> list[list[float]]:
+        """
+        Moves a list of (x,y) points so that the smallest x and y values would be 0. Then scales the points x-y
+        coordinates by `scale_by`.
+        :param points: A list of (x, y) points to normalize.
+        :param scale_by: A factor to scale the coordinates by.
+        :return: A list contains the new moved and scaled (x, y) coordinates of `points`.
+        """
+        min_x, min_y = min(points, key=lambda p: p[0])[0], min(points, key=lambda p: p[1])[1]
 
-        unique, counts = np.unique(numbers, return_counts=True)
-        last_sum = 0
-        last_j = 0
-        for i, n in enumerate(unique):
-            found = last_sum
+        normalized = []
+        for point in points:
+            x, y = point
+            normalized.append([(x - min_x) * scale_by, (y - min_y) * scale_by])
+        return normalized
 
-            j = last_j
-            while j < len(unique) and unique[j] - n < window_size:
-                found += counts[j]
-                j += 1
+    def estimate_sticker_locations(self, normalized_positions) -> list[tuple[int, int]]:
+        """
+        Estimate in-face locations of a given points list. Uses a stable marriage solution as an approximation for the
+        best sticker-location mapping.
+        :param normalized_positions: A list of normalized (x, y) points. See: `WebcamCube.normalize_points()`.
+            Each point represent the detected center of a sticker in a face.
+        :return: A list whose i-th element is the estimated (col, row) of the i-th point in the face.
+        """
+        # build proposer and non-proposer preferences for the stable marriage algorithm:
+        options = [(col, row) for col in range(self.cube_size) for row in range(self.cube_size)]
 
-            if found > best_beginning_occurrences:
-                best_beginning_occurrences = found
-                best_beginning = n
+        distances_from_options = [[-1] * len(options) for _ in range(len(normalized_positions))]
+        distances_from_points = [[-1] * len(normalized_positions) for _ in range(len(options))]
 
-            last_sum = found - counts[i]
-            last_j = j
+        for i, (x, y) in enumerate(normalized_positions):
+            for j, (option_x, option_y) in enumerate(options):
+                dist = (x - option_x) ** 2 + (y - option_y) ** 2
+                distances_from_options[i][j] = dist
+                distances_from_points[j][i] = dist
 
-        return best_beginning
+        proposer_preferences = []
+        non_proposer_ranking = [[-1] * len(normalized_positions) for _ in range(len(options))]
+
+        for i, distances in enumerate(distances_from_options):
+            distances = [list(x) for x in enumerate(distances)]
+            distances.sort(key=lambda v: v[1])
+            proposer_preferences.append([v[0] for v in distances])
+
+        for j, distances in enumerate(distances_from_points):
+            distances = [list(x) for x in enumerate(distances)]
+            distances.sort(key=lambda v: v[1])
+            for rank, v in enumerate(distances):
+                non_proposer_ranking[j][v[0]] = rank
+
+        stable_match = WebcamCube.stable_marriage(proposer_preferences, non_proposer_ranking)
+        locations = []
+        for non_proposer_index in stable_match:
+            locations.append(options[non_proposer_index])
+
+        return locations
+
+    @staticmethod
+    def stable_marriage(proposers_preferences: list[list[int]], non_proposers_rankings: list[list[int]]) -> list[int]:
+        """
+        Finds a solution to the Stable Marriage Problem using the Gale-Shapley algorithm.
+        :param proposers_preferences: A list with the proposer preference lists. The i-th element is a list contains the
+            preferences of the i-th proposer. In a proposer preferences list, the i-th element is the index of i-th
+            prioritized non-proposer.
+        :param non_proposers_rankings: A list with the non-proposer ranking lists. The i-th element is a list contains
+            the ranking of the i-th non-proposer. *Unlike in a proposer preferences list*, In a non-proposer ranking
+            list, the i-th element is the rank of the i-th proposer for the non-proposer. The most desired proposer of
+            the non-proposer gets rank 0, and the most undesired proposer gets the largest rank.
+
+        Notice: There might be more non-proposers than proposers. The other way around is not supported.
+
+        :return: The stable match that was found. The i-th element is the index of non-proposer matched with the
+            i-th proposer.
+        """
+        n, m = len(proposers_preferences), len(non_proposers_rankings)
+        if n > m:
+            raise ValueError(f"More proposers ({n}) than non-proposers ({m})")
+
+        unmatched_proposer_ids = Queue(n)
+        for proposer_id in range(n):
+            unmatched_proposer_ids.put(proposer_id)
+
+        # The i-th element is the number of times that the i-th proposer has been turned down so far
+        proposer_turned_down_counters = [0] * n
+
+        # The i-th element is the index of current non-proposer match of the i-th proposer
+        stable_match = [-1] * n
+
+        # The i-th element is the index of current proposer match of the i-th non-proposer
+        stable_match_inverted = [-1] * m
+
+        while unmatched_proposer_ids.qsize() > 0:
+            proposer_id = unmatched_proposer_ids.get()
+            turned_down_times = proposer_turned_down_counters[proposer_id]
+            propose_to_id = proposers_preferences[proposer_id][turned_down_times]
+
+            is_non_proposer_available = stable_match_inverted[propose_to_id] == -1
+            if is_non_proposer_available:
+                stable_match[proposer_id] = propose_to_id
+                stable_match_inverted[propose_to_id] = proposer_id
+
+            else:
+                non_proposer_pref = non_proposers_rankings[propose_to_id]
+                proposer_place = non_proposer_pref[proposer_id]
+                curr_match_proposer_id = stable_match_inverted[propose_to_id]
+                curr_match_proposes_place = non_proposer_pref[curr_match_proposer_id]
+
+                if proposer_place < curr_match_proposes_place:
+                    proposer_turned_down_counters[curr_match_proposer_id] += 1
+                    unmatched_proposer_ids.put(curr_match_proposer_id)
+
+                    stable_match[proposer_id] = propose_to_id
+                    stable_match_inverted[propose_to_id] = proposer_id
+
+                else:
+                    proposer_turned_down_counters[proposer_id] += 1
+                    unmatched_proposer_ids.put(proposer_id)
+
+        return stable_match
 
     ####################################################################################################################
 
@@ -337,17 +441,32 @@ class WebcamCube:
 
             detected_face_colors = [[None for _ in range(self.cube_size)] for _ in range(self.cube_size)]
 
-            contours = []
+            contours = sticker_contours_by_layer[0]
             for layer in sticker_contours_by_layer:
                 contours.extend(layer)
             if len(contours) > 0:
                 rectangles = WebcamCube.get_rectangles(contours)
                 sticker_side_length = WebcamCube.estimate_sticker_side_length(contours)
                 face_a_value, face_b_value = WebcamCube.estimate_face_slope(rectangles)
-                estimated_sticker_locations = WebcamCube.estimate_sticker_locations(rectangles, face_a_value,
-                                                                                    face_b_value, sticker_side_length,
-                                                                                    frame=frame)
-                for i, (row, col) in enumerate(estimated_sticker_locations):
+
+                WebcamCube.combine_overlap_rectangles(rectangles, 0.5)
+                for rect in rectangles:  # todo change
+                    cv2.drawContours(frame, [np.int_(cv2.boxPoints(rect))], 0, (255, 255, 255), 2)
+
+                points = WebcamCube.get_center_points(rectangles)
+                # pivot does not matter because of the normalization
+                points = WebcamCube.translate_points_to_new_axes(points, (0, 0), face_a_value, face_b_value)
+                points = WebcamCube.normalize_points(points, 1 / sticker_side_length)
+
+                if len(points) > self.cube_size ** 2:
+                    print(
+                        f"Too many stickers detected ({len(points)}), maximum for {self.cube_size}x{self.cube_size} "
+                        f"cube is {self.cube_size ** 2}.", file=sys.stderr)
+                    points = points[:self.cube_size ** 2]
+
+                estimated_sticker_locations = self.estimate_sticker_locations(points)
+
+                for i, (col, row) in enumerate(estimated_sticker_locations):
                     mask = np.zeros((height, width), np.uint8)
                     cv2.drawContours(mask, contours, i, (255, 255, 255), 1)
                     found_color = cv2.mean(frame, mask=mask)
@@ -358,20 +477,6 @@ class WebcamCube:
                     else:
                         print(f"{row= }, {col= }")
                         pass
-
-            frame = cv2.drawContours(frame, contours, -1, (255, 255, 0), 2)
-
-            ###########################################################
-            # angle = self.select_relevant_contours(sticker_contours_by_layer)
-            # x = int(1000 * np.cos(angle * np.pi / 180))
-            # y = int(1000 * np.sin(angle * np.pi / 180))
-            # cv2.line(frame, (-x, -y), (x, y), (0, 0, 255), 2)
-            # x = int(-1000 * np.sin(angle * np.pi / 180))
-            # y = int(1000 * np.cos(angle * np.pi / 180))
-            # cv2.line(frame, (width - x, -y), (x + width, y), (0, 0, 255), 2)
-
-            # WebcamCube.draw_contours(frame, sticker_contours_by_layer, (255, 255, 0))
-            ###########################################################
 
             detected_face_bgr_frame = np.zeros((height, width, 3), np.uint8)
             self.draw_face(detected_face_bgr_frame, detected_face_colors)
@@ -437,7 +542,7 @@ class WebcamCube:
 
     def video_cube(self):
         capture = cv2.VideoCapture(0)
-        frame = WebcamCube.read_capture(capture)
+        # frame = WebcamCube.read_capture(capture)
 
         # while True:
         #     frame = read_capture(capture)
@@ -467,6 +572,15 @@ if __name__ == '__main__':
     webcamCube.video_cube()
 
 # todo: check for static method calls which still use self.
-#       remove print statements
+#       remove unnecessary print statements
 #       delete unused methods
-#       use cv2.rotatedRectangleIntersection() for overlapping contours detection
+# find 3d-orientation of the face.
+# deduce face size if it had been placed parallel to the camera view plane.
+# combine overlap contours.
+# discard contours with unfitting 3d-orientation.
+# sort remaining contours by position in the 2 axis of the face in 3d.
+
+# go over face-sized slices (don't forget to change size as you get further away from the camera) and select the
+# one contains most contours.
+
+# discard other contours.
